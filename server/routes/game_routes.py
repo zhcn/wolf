@@ -58,6 +58,7 @@ def assign_roles(room_id):
         }
         logger.debug(f"📤 [assign_roles] 返回响应: {response}")
         return success_response(response, "Roles assigned successfully")
+
     except Exception as e:
         logger.error(f"❌ [assign_roles] 错误: {str(e)}", exc_info=True)
         return error_response(500, f"Error assigning roles: {str(e)}")
@@ -300,6 +301,35 @@ def get_agent_speech(room_id):
     except Exception as e:
         logger.error(f"❌ [agent_speech] 错误: {str(e)}", exc_info=True)
         return error_response(500, f"Error generating agent speech: {str(e)}")
+
+@bp.route('/<room_id>/advance-speaker', methods=['POST'])
+def advance_speaker(room_id):
+    """
+    推进到下一个发言者
+    POST /rooms/{roomId}/advance-speaker
+    """
+    logger.debug(f"🎤 [advance_speaker] 房间: {room_id}")
+    try:
+        game = get_game(room_id)
+        if not game:
+            logger.warning(f"⚠️ [advance_speaker] 房间不存在: {room_id}")
+            return error_response(404, f"Game room {room_id} not found")
+
+        # 推进发言者
+        success = game.advance_speaker()
+        if not success:
+            logger.info(f"ℹ️ [advance_speaker] 所有人都发言完了，结束讨论阶段")
+        else:
+            logger.info(f"✅ [advance_speaker] 推进到下一个发言者")
+
+        response = {
+            'success': success,
+            'currentSpeaker': game.game_state.speaking_order[game.game_state.current_speaker_index] if success and game.game_state.speaking_order else None
+        }
+        return success_response(response, "Speaker advanced successfully")
+    except Exception as e:
+        logger.error(f"❌ [advance_speaker] 错误: {str(e)}", exc_info=True)
+        return error_response(500, f"Error advancing speaker: {str(e)}")
 
 @bp.route('/<room_id>/agent-action', methods=['POST'])
 def get_agent_action(room_id):

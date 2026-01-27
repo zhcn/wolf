@@ -62,7 +62,6 @@ def log_request():
     # 记录请求信息
     request_method = request.method
     request_path = request.path
-    request_ip = request.remote_addr
 
     # 记录请求体
     request_data = None
@@ -72,18 +71,9 @@ def log_request():
         else:
             request_data = request.get_data(as_text=True)
 
-    api_logger.info(f"""
-╔══════════════════════════════════════════════════════════════════════
-║ 📨 API 请求
-╠══════════════════════════════════════════════════════════════════════
-║ 时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}
-║ 方法: {request_method}
-║ 路径: {request_path}
-║ IP: {request_ip}
-║ Headers: {dict(request.headers)}
-║ 请求体: {json.dumps(request_data, indent=2, ensure_ascii=False) if request_data else 'None'}
-╚══════════════════════════════════════════════════════════════════════
-    """)
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+    request_body = json.dumps(request_data, ensure_ascii=False) if request_data else 'None'
+    api_logger.info(f"📨 [{timestamp}] {request_method} {request_path} | 请求体: {request_body}")
 
 @app.after_request
 def log_response(response):
@@ -92,7 +82,6 @@ def log_response(response):
 
     # 记录响应信息
     status_code = response.status_code
-    content_type = response.content_type
 
     # 尝试解析响应体
     response_data = None
@@ -100,23 +89,12 @@ def log_response(response):
         try:
             response_data = response.get_json()
         except:
-            response_data = response.get_data(as_text=True)
+            response_data = response.get_data(as_text=True)[:200]
     else:
-        response_data = response.get_data(as_text=True)[:200]  # 限制长度
+        response_data = response.get_data(as_text=True)[:200]
 
-    # 根据状态码选择日志级别
-    log_level = 'INFO' if status_code < 400 else 'WARNING' if status_code < 500 else 'ERROR'
-
-    api_logger.info(f"""
-╔══════════════════════════════════════════════════════════════════════
-║ 📤 API 响应
-╠══════════════════════════════════════════════════════════════════════
-║ 状态码: {status_code} ({log_level})
-║ 耗时: {duration:.3f}s
-║ Content-Type: {content_type}
-║ 响应体: {json.dumps(response_data, indent=2, ensure_ascii=False) if response_data else 'None'}
-╚══════════════════════════════════════════════════════════════════════
-    """)
+    response_body = json.dumps(response_data, ensure_ascii=False) if response_data else 'None'
+    api_logger.info(f"📤 HTTP {status_code} | 耗时: {duration:.3f}s | 响应体: {response_body}")
 
     return response
 

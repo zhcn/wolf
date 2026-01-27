@@ -76,6 +76,18 @@ class GameState:
     # 投票数据
     vote_count: Dict[int, int] = field(default_factory=dict)
 
+    # 发言相关（白天讨论阶段）
+    speaking_order: List[int] = field(default_factory=list)  # 发言顺序
+    current_speaker_index: int = 0  # 当前发言者在列表中的索引
+    speaking_start_time: float = 0.0  # 发言开始时间
+    phase_start_time: float = 0.0  # 阶段开始时间（用于计算剩余时间）
+    phase_duration: int = 0  # 阶段持续时间（秒）
+
+    # 投票相关（投票阶段）
+    voting_start_time: float = 0.0  # 投票开始时间
+    voting_voted_count: int = 0  # 已投票人数
+    voting_result: Optional[Dict] = None  # 投票结果 {voted_out, vote_counts}
+
 class GameEngine:
     """狼人杀游戏引擎"""
 
@@ -147,14 +159,19 @@ class GameEngine:
         推进游戏到下一阶段
         返回: (阶段名称, 持续时间秒)
         """
+        from datetime import datetime
         current_phase = self.game_state.phase
 
         if current_phase == GamePhase.ROLE_ASSIGNED:
             next_phase = GamePhase.DAY_DISCUSSION
             duration = 120  # 白天讨论 2 分钟
+            # 初始化发言顺序
+            self._init_speaking_order()
         elif current_phase == GamePhase.DAY_DISCUSSION:
             next_phase = GamePhase.DAY_VOTING
-            duration = 60   # 白天投票 1 分钟
+            duration = 20   # 白天投票 20 秒
+            # 初始化投票
+            self._init_voting()
         elif current_phase == GamePhase.DAY_VOTING:
             # 执行投票驱逐逻辑
             self._execute_voting()
@@ -171,11 +188,16 @@ class GameEngine:
                 self.game_state.round += 1
                 next_phase = GamePhase.DAY_DISCUSSION
                 duration = 120
+                # 初始化新一轮的发言顺序
+                self._init_speaking_order()
         else:
             next_phase = GamePhase.WAITING
             duration = 0
 
         self.game_state.phase = next_phase
+        self.game_state.phase_start_time = datetime.now().timestamp()
+        self.game_state.phase_duration = duration
+
         self._add_message('phase_change', {
             'from': current_phase.value,
             'to': next_phase.value,
@@ -183,6 +205,43 @@ class GameEngine:
         })
 
         return next_phase.value, duration
+
+    def _init_speaking_order(self):
+        """初始化发言顺序（所有活着的玩家）"""
+        from datetime import datetime
+        self.game_state.speaking_order = [p.seat for p in self.game_state.players.values() if p.alive]
+        self.game_state.current_speaker_index = 0
+        self.game_state.speaking_start_time = datetime.now().timestamp()
+
+    def advance_speaker(self) -> bool:
+        """
+        推进到下一个发言者
+        返回: 是否成功推进（如果所有人都发言完了，返回 False）
+        """
+        if not self.game_state.speaking_order:
+            return False
+
+        next_index = self.game_state.current_speaker_index + 1
+        if next_index >= len(self.game_state.speaking_order):
+            # 所有人都发言完了
+            return False
+
+        self.game_state.current_speaker_index = next_index
+        from datetime import datetime
+        self.game_state.speaking_start_time = datetime.now().timestamp()
+        return True
+
+    def _init_voting(self):
+        """初始化投票"""
+        from datetime import datetime
+        # 重置所有玩家的投票状态
+        for player in self.game_state.players.values():
+            player.has_voted = False
+            player.voted_for = None
+
+        self.game_state.voting_start_time = datetime.now().timestamp()
+        self.game_state.voting_voted_count = 0
+        self.game_state.voting_result = None
 
     def _execute_voting(self):
         """执行白天投票逻辑"""
@@ -309,9 +368,47 @@ class GameEngine:
         if not target.alive:
             return False
 
+        # 如果之前没投过票，计数加1
+        if not voter.has_voted:
+            self.game_state.voting_voted_count += 1
+
         voter.voted_for = target_seat
         voter.has_voted = True
+
+        # 检查是否所有活着的玩家都已投票
+        alive_count = sum(1 for p in self.game_state.players.values() if p.alive)
+        if self.game_state.voting_voted_count >= alive_count:
+            # 自动计算投票结果
+            self._calculate_voting_result()
+
         return True
+
+    def _calculate_voting_result(self):
+        """计算投票结果"""
+        votes = {}
+        for seat, player in self.game_state.players.items():
+            if player.alive and player.voted_for:
+                target = player.voted_for
+                votes[target] = votes.get(target, 0) + 1
+
+        if not votes:
+            self.game_state.voting_result = {
+                'voted_out': None,
+                'vote_counts': {}
+            }
+            return
+
+        # 找出票数最多的玩家
+        max_votes = max(votes.values())
+        voted_outs = [seat for seat, count in votes.items() if count == max_votes]
+
+        # 平票处理：随机选择
+        voted_out = random.choice(voted_outs) if len(voted_outs) > 1 else voted_outs[0]
+
+        self.game_state.voting_result = {
+            'voted_out': voted_out,
+            'vote_counts': votes
+        }
 
     def submit_night_action(self, player_seat: int, role: str, action_type: str,
                            target_seat: Optional[int] = None) -> bool:
@@ -344,19 +441,61 @@ class GameEngine:
     def get_state(self) -> Dict:
         """
         获取当前游戏状态
-        返回: 游戏状态字典
+        返回: 游戏状态字典 (使用 camelCase)
         """
+        from datetime import datetime
         alive_players = [p.seat for p in self.game_state.players.values() if p.alive]
         dead_players = [p.seat for p in self.game_state.players.values() if not p.alive]
 
-        return {
-            'room_id': self.room_id,
+        state = {
+            'roomId': self.room_id,
             'phase': self.game_state.phase.value,
             'result': self.game_state.result.value,
             'round': self.game_state.round,
-            'alive_players': alive_players,
-            'dead_players': dead_players,
+            'alivePlayers': alive_players,
+            'deadPlayers': dead_players,
         }
+
+        # 计算阶段剩余时间
+        if self.game_state.phase_start_time > 0 and self.game_state.phase_duration > 0:
+            elapsed = datetime.now().timestamp() - self.game_state.phase_start_time
+            phase_time_left = max(0, self.game_state.phase_duration - int(elapsed))
+            state['phaseTimeLeft'] = phase_time_left
+
+        # 如果在发言阶段，返回发言相关信息
+        if self.game_state.phase == GamePhase.DAY_DISCUSSION:
+            current_speaker = None
+            if self.game_state.speaking_order and self.game_state.current_speaker_index < len(self.game_state.speaking_order):
+                current_speaker = self.game_state.speaking_order[self.game_state.current_speaker_index]
+
+            elapsed_time = datetime.now().timestamp() - self.game_state.speaking_start_time
+            time_left = max(0, 60 - int(elapsed_time))  # 60秒发言时间
+
+            state['speakingOrder'] = self.game_state.speaking_order
+            state['currentSpeaker'] = current_speaker
+            state['currentSpeakerIndex'] = self.game_state.current_speaker_index
+            state['speakingTimeLeft'] = time_left
+
+        # 如果在投票阶段，返回投票相关信息
+        if self.game_state.phase == GamePhase.DAY_VOTING:
+            elapsed_time = datetime.now().timestamp() - self.game_state.voting_start_time
+            time_left = max(0, 20 - int(elapsed_time))  # 20秒投票时间
+
+            state['votingTimeLeft'] = time_left
+            state['votingVotedCount'] = self.game_state.voting_voted_count
+            state['votingResult'] = self.game_state.voting_result
+
+            # 返回每个玩家的投票状态
+            player_votes = {}
+            for seat, player in self.game_state.players.items():
+                if player.alive:
+                    player_votes[seat] = {
+                        'hasVoted': player.has_voted,
+                        'votedFor': player.voted_for
+                    }
+            state['playerVotes'] = player_votes
+
+        return state
 
     def _add_message(self, msg_type: str, content: Dict):
         """添加游戏消息"""

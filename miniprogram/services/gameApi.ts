@@ -43,9 +43,15 @@ export type GameStateResponse = {
   round: number                    // 当前轮数
   alivePlayers: number[]            // 存活玩家座位号
   deadPlayers: number[]             // 死亡玩家座位号
+  phaseTimeLeft?: number           // 阶段剩余时间（秒）
   currentSpeaker?: number          // 当前发言者座位号
+  currentSpeakerIndex?: number     // 当前发言者索引
+  speakingOrder?: number[]         // 发言顺序
   speakingTimeLeft?: number        // 发言剩余时间（秒）
   votingTimeLeft?: number          // 投票剩余时间（秒）
+  votingVotedCount?: number        // 已投票人数
+  votingResult?: Record<string, any>  // 投票结果
+  playerVotes?: Record<number, any>   // 玩家投票状态
   nightActionTimeLeft?: number     // 晚上行动剩余时间（秒）
   lastDeadPlayer?: {
     seat: number
@@ -131,6 +137,16 @@ export type GetAgentSpeechRequest = {
 export type GetAgentSpeechResponse = {
   seat: number
   text: string  // Agent 生成的发言内容
+}
+
+// 推进发言者
+export type AdvanceSpeakerRequest = {
+  roomId: string
+}
+
+export type AdvanceSpeakerResponse = {
+  success: boolean
+  currentSpeaker?: number
 }
 
 // 获取 Agent 晚上行动
@@ -367,6 +383,14 @@ export async function getAgentSpeech(req: GetAgentSpeechRequest): Promise<GetAge
   return await request<GetAgentSpeechResponse, GetAgentSpeechRequest>({
     method: 'POST',
     path: `/rooms/${encodeURIComponent(req.roomId)}/agent-speech`,
+    data: req,
+  })
+}
+
+export async function advanceSpeaker(req: AdvanceSpeakerRequest): Promise<AdvanceSpeakerResponse> {
+  return await request<AdvanceSpeakerResponse, AdvanceSpeakerRequest>({
+    method: 'POST',
+    path: `/rooms/${encodeURIComponent(req.roomId)}/advance-speaker`,
     data: req,
   })
 }
