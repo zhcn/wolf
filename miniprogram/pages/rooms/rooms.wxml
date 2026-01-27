@@ -1,0 +1,42 @@
+<navigation-bar title="狼人杀" back="{{false}}" color="black" background="#FFF"></navigation-bar>
+
+<scroll-view class="scrollarea" scroll-y type="list">
+  <view class="container">
+    <view class="section-title">你的身份（用于展示头像昵称）</view>
+
+    <view class="userinfo">
+      <block wx:if="{{canIUseNicknameComp && !hasUserInfo}}">
+        <button class="avatar-wrapper" open-type="chooseAvatar" bind:chooseavatar="onChooseAvatar">
+          <image class="avatar" src="{{userInfo.avatarUrl}}"></image>
+        </button>
+        <view class="nickname-wrapper">
+          <text class="nickname-label">昵称</text>
+          <input type="nickname" class="nickname-input" placeholder="请输入昵称" bind:change="onInputChange" />
+        </view>
+      </block>
+      <block wx:elif="{{!hasUserInfo}}">
+        <button wx:if="{{canIUseGetUserProfile}}" bindtap="getUserProfile"> 获取头像昵称 </button>
+        <view wx:else> 请使用2.10.4及以上版本基础库 </view>
+      </block>
+      <block wx:else>
+        <view class="profile-row">
+          <image class="userinfo-avatar" src="{{userInfo.avatarUrl}}" mode="cover"></image>
+          <view class="profile-meta">
+            <view class="profile-name">{{userInfo.nickName}}</view>
+            <view class="profile-tip">进入房间后会随机分配座位</view>
+          </view>
+        </view>
+      </block>
+    </view>
+
+    <view class="section-title">房间</view>
+    <view class="room-card">
+      <view class="room-title">经典玩法</view>
+      <view class="room-subtitle">12人局（你 + 11 个 Agent）</view>
+      <button class="room-btn" type="primary" disabled="{{!hasUserInfo}}" bindtap="enterClassicRoom">
+        {{ hasUserInfo ? '进入房间' : '请先获取头像昵称' }}
+      </button>
+    </view>
+  </view>
+</scroll-view>
+

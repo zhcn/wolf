@@ -1,0 +1,132 @@
+<navigation-bar title="经典玩法房间" back="{{true}}" color="black" background="#FFF"></navigation-bar>
+
+<view class="game-page">
+  <!-- 房间信息栏 -->
+  <view class="room-header">
+    <view class="room-info">
+      <text class="info-text">房间: {{roomId}}</text>
+      <text class="info-text">座位: {{mySeat}}号</text>
+      <text class="info-text">轮数: {{round > 0 ? round : '准备中'}}</text>
+    </view>
+    <view class="room-phase">
+      <text class="phase-text">{{phaseText}}</text>
+      <text class="phase-timer" wx:if="{{timeLeft > 0}}">{{timeLeft}}s</text>
+    </view>
+    <view class="room-role" wx:if="{{myRoleZh}}">
+      <text class="role-label">你的角色:</text>
+      <text class="role-value">{{myRoleZh}}</text>
+    </view>
+  </view>
+
+  <!-- 主游戏区域 -->
+  <view class="game-main">
+    <!-- 左侧玩家 -->
+    <view class="players-side left-side">
+      <view class="player-item {{item.isMe ? 'me' : ''}} {{item.seat === currentSpeaker ? 'speaking' : ''}}" wx:for="{{leftPlayers}}" wx:key="seat">
+        <image class="player-avatar" src="{{item.avatarUrl}}" mode="cover"></image>
+        <view class="player-info">
+          <view class="player-name">{{item.nickName}}</view>
+          <view class="player-seat">{{item.seat}}号</view>
+        </view>
+      </view>
+    </view>
+
+    <!-- 中间对话区域 -->
+    <view class="dialog-area">
+      <!-- 等待开始 -->
+      <view class="phase-waiting" wx:if="{{phase === 'waiting'}}">
+        <view class="waiting-icon">⏳</view>
+        <text class="waiting-text">等待玩家加入房间...</text>
+        <button class="ctrl-btn primary" bindtap="startGame">开始游戏</button>
+      </view>
+
+      <!-- 角色分配 -->
+      <view class="phase-role-assign" wx:if="{{phase === 'role_assigned'}}">
+        <view class="role-assign-icon">🎭</view>
+        <text class="role-assign-text">角色已分配！</text>
+        <text class="role-assign-tip">{{ myRoleZh ? '你的角色是：' + myRoleZh : '请稍候...' }}</text>
+        <text class="role-assign-countdown">即将进入白天讨论阶段...</text>
+      </view>
+
+      <!-- 讨论阶段 -->
+      <view class="phase-discussing" wx:if="{{phase === 'discussing'}}">
+        <view class="discussing-header">💬 白天讨论</view>
+        <scroll-view class="speeches-scroll" scroll-y type="list">
+          <view class="speeches" wx:if="{{speeches.length}}">
+            <view class="speech-item" wx:for="{{speeches}}" wx:key="id">
+              <view class="speech-header">
+                <text class="speech-seat">{{item.seat}}号</text>
+                <text class="speech-time">{{item.at}}</text>
+              </view>
+              <view class="speech-content">{{item.text}}</view>
+            </view>
+          </view>
+          <view class="no-speeches" wx:else>暂无发言</view>
+        </scroll-view>
+        <view class="speech-input-area">
+          <textarea
+            class="speech-input"
+            placeholder="输入你的发言..."
+            value="{{speechDraft}}"
+            bindinput="onSpeechInput"
+            maxlength="300">
+          </textarea>
+          <button class="submit-speech-btn" bindtap="submitSpeech">提交发言</button>
+        </view>
+      </view>
+
+      <!-- 投票阶段 -->
+      <view class="phase-voting" wx:if="{{phase === 'voting'}}">
+        <view class="voting-header">🗳️ 白天投票</view>
+        <text class="voting-tip">选择要投票的玩家</text>
+        <view class="voting-players">
+          <view class="vote-player-item {{item === mySeat ? 'disabled' : ''}}"
+            wx:for="{{alivePlayers}}"
+            wx:key="*this"
+            bindtap="submitMyVote"
+            data-target="{{item}}"
+            wx:if="{{item !== mySeat}}">
+            <view class="vote-seat">{{item}}号</view>
+          </view>
+        </view>
+      </view>
+
+      <!-- 晚上行动阶段 -->
+      <view class="phase-night" wx:if="{{phase === 'night'}}">
+        <view class="night-header">🌙 晚上行动</view>
+        <text class="night-tip">根据你的角色执行相应的夜间行动</text>
+        <view class="night-action-info">
+          <text wx:if="{{myRole === 'werewolf'}}">狼人正在选择要杀死的目标...</text>
+          <text wx:if="{{myRole === 'seer'}}">预言家正在选择要检查的目标...</text>
+          <text wx:if="{{myRole === 'witch'}}">女巫正在检查今晚的情况...</text>
+          <text wx:if="{{myRole === 'hunter' || myRole === 'villager'}}">请稍候，其他角色正在行动中...</text>
+        </view>
+      </view>
+
+      <!-- 结果展示 -->
+      <view class="phase-result" wx:if="{{phase === 'result'}}">
+        <view class="result-header">📊 今日结果</view>
+        <text class="result-tip">即将进入下一阶段...</text>
+      </view>
+
+      <!-- 游戏结束 -->
+      <view class="phase-game-over" wx:if="{{phase === 'game_over'}}">
+        <view class="game-over-icon">🎉</view>
+        <text class="game-over-text">游戏结束！</text>
+        <button class="ctrl-btn primary" bindtap="startGame">重新开始</button>
+      </view>
+    </view>
+
+    <!-- 右侧玩家 -->
+    <view class="players-side right-side">
+      <view class="player-item {{item.isMe ? 'me' : ''}} {{item.seat === currentSpeaker ? 'speaking' : ''}}" wx:for="{{rightPlayers}}" wx:key="seat">
+        <view class="player-info">
+          <view class="player-name">{{item.nickName}}</view>
+          <view class="player-seat">{{item.seat}}号</view>
+        </view>
+        <image class="player-avatar" src="{{item.avatarUrl}}" mode="cover"></image>
+      </view>
+    </view>
+  </view>
+</view>
+

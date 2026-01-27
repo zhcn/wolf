@@ -1,0 +1,624 @@
+page {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #f5f5f5;
+}
+
+.game-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.room-header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 12rpx 24rpx;
+  box-sizing: border-box;
+  box-shadow: 0 4rpx 12rpx rgba(0, 0, 0, 0.1);
+}
+
+.room-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20rpx;
+  font-size: 22rpx;
+  margin-bottom: 8rpx;
+}
+
+.info-text {
+  white-space: nowrap;
+}
+
+.room-phase {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  margin-bottom: 8rpx;
+  font-size: 26rpx;
+  font-weight: 600;
+}
+
+.phase-text {
+  flex: 1;
+}
+
+.phase-timer {
+  background: rgba(255, 255, 255, 0.3);
+  padding: 6rpx 12rpx;
+  border-radius: 6rpx;
+  font-size: 24rpx;
+  font-weight: 700;
+}
+
+.room-role {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  font-size: 24rpx;
+}
+
+.role-label {
+  opacity: 0.9;
+}
+
+.role-value {
+  background: rgba(255, 215, 0, 0.3);
+  color: #ffd700;
+  font-weight: 700;
+  padding: 4rpx 10rpx;
+  border-radius: 4rpx;
+}
+
+/* 主游戏区域 */
+.game-main {
+  display: flex;
+  flex: 1;
+  gap: 16rpx;
+  padding: 16rpx;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+/* 左右侧玩家列表 */
+.players-side {
+  width: 140rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+  overflow-y: auto;
+  background: white;
+  border-radius: 12rpx;
+  padding: 12rpx;
+  box-sizing: border-box;
+  box-shadow: 0 4rpx 12rpx rgba(0, 0, 0, 0.08);
+}
+
+.left-side {
+}
+
+.right-side {
+}
+
+.player-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8rpx;
+  padding: 10rpx;
+  background: #f9f9f9;
+  border-radius: 10rpx;
+  transition: all 0.3s ease;
+}
+
+.player-item.me {
+  background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
+  border: 2rpx solid #667eea;
+  box-shadow: 0 4rpx 8rpx rgba(102, 126, 234, 0.2);
+}
+
+.player-item.speaking {
+  background: linear-gradient(135deg, #ff6b6b15 0%, #ee5a6f15 100%);
+  border: 3rpx solid #ff6b6b;
+  box-shadow: 0 0 16rpx rgba(255, 107, 107, 0.4), inset 0 0 8rpx rgba(255, 107, 107, 0.1);
+  animation: speakingGlow 1.5s ease-in-out infinite;
+}
+
+@keyframes speakingGlow {
+  0%, 100% {
+    box-shadow: 0 0 16rpx rgba(255, 107, 107, 0.4), inset 0 0 8rpx rgba(255, 107, 107, 0.1);
+  }
+  50% {
+    box-shadow: 0 0 24rpx rgba(255, 107, 107, 0.6), inset 0 0 12rpx rgba(255, 107, 107, 0.2);
+  }
+}
+
+.player-avatar {
+  width: 80rpx;
+  height: 80rpx;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 2rpx solid #ddd;
+  flex-shrink: 0;
+}
+
+.player-item.me .player-avatar {
+  border-color: #667eea;
+  box-shadow: 0 0 8rpx rgba(102, 126, 234, 0.5);
+}
+
+.player-item.speaking .player-avatar {
+  border-color: #ff6b6b;
+  box-shadow: 0 0 12rpx rgba(255, 107, 107, 0.8);
+}
+
+.player-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  gap: 2rpx;
+}
+
+.player-name {
+  font-size: 22rpx;
+  font-weight: 600;
+  color: #111;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+  padding: 0 4rpx;
+  box-sizing: border-box;
+}
+
+.player-seat {
+  font-size: 18rpx;
+  color: #888;
+}
+
+/* 中间对话区域 */
+.dialog-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: white;
+  border-radius: 12rpx;
+  padding: 16rpx;
+  box-sizing: border-box;
+  box-shadow: 0 4rpx 12rpx rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+}
+
+.controls {
+  display: flex;
+  gap: 12rpx;
+  margin-bottom: 12rpx;
+}
+
+.ctrl-btn {
+  flex: 1;
+  height: 72rpx;
+  font-size: 24rpx;
+  border-radius: 8rpx;
+  padding: 0;
+  margin: 0;
+  border: none;
+}
+
+.ctrl-btn.primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.ctrl-btn.primary:active {
+  opacity: 0.8;
+}
+
+.ctrl-btn.primary[disabled] {
+  background: #ccc;
+  color: #999;
+}
+
+.ctrl-btn.secondary {
+  background: #f0f0f0;
+  color: #333;
+  border: 1px solid #ddd;
+}
+
+.ctrl-btn.secondary:active {
+  background: #e0e0e0;
+}
+
+.ctrl-btn.secondary[disabled] {
+  background: #f5f5f5;
+  color: #999;
+  border-color: #eee;
+}
+
+/* 发言输入区 */
+.speaking-area {
+  background: #fafafa;
+  border-radius: 8rpx;
+  padding: 12rpx;
+  margin-bottom: 12rpx;
+  box-sizing: border-box;
+  border: 1px solid #f0f0f0;
+}
+
+.speaking-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10rpx;
+}
+
+.speaking-title {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: #111;
+}
+
+.speaking-timer {
+  font-size: 22rpx;
+  color: #ff4d4f;
+  font-weight: 600;
+}
+
+.speech-input {
+  width: 100%;
+  height: 120rpx;
+  border-radius: 8rpx;
+  padding: 10rpx;
+  box-sizing: border-box;
+  background: white;
+  border: 1px solid #e0e0e0;
+  font-size: 24rpx;
+  margin-bottom: 8rpx;
+}
+
+.end-speech-btn {
+  width: 100%;
+  height: 60rpx;
+  font-size: 22rpx;
+  border-radius: 6rpx;
+  background: #ff4d4f;
+  color: white;
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+.end-speech-btn:active {
+  opacity: 0.8;
+}
+
+/* 发言记录 */
+.speeches-scroll {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.speeches {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 12rpx;
+}
+
+.speech-item {
+  background: #f9f9f9;
+  border-left: 3px solid #667eea;
+  border-radius: 6rpx;
+  padding: 12rpx;
+  box-sizing: border-box;
+  animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10rpx);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.speech-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6rpx;
+}
+
+.speech-seat {
+  font-size: 22rpx;
+  font-weight: 600;
+  color: #667eea;
+}
+
+.speech-time {
+  font-size: 18rpx;
+  color: #888;
+}
+
+.speech-content {
+  font-size: 24rpx;
+  color: #333;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.no-speeches {
+  text-align: center;
+  padding: 40rpx 20rpx;
+  color: #999;
+  font-size: 24rpx;
+}
+
+/* ========== 游戏阶段样式 ========== */
+
+/* 等待开始 */
+.phase-waiting {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  gap: 20rpx;
+}
+
+.waiting-icon {
+  font-size: 80rpx;
+  line-height: 1;
+  animation: spin 2s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.waiting-text {
+  font-size: 28rpx;
+  color: #333;
+  font-weight: 600;
+}
+
+/* 角色分配 */
+.phase-role-assign {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  gap: 16rpx;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
+  border-radius: 12rpx;
+  padding: 24rpx;
+  box-sizing: border-box;
+  border: 2rpx solid rgba(102, 126, 234, 0.2);
+}
+
+.role-assign-icon {
+  font-size: 60rpx;
+  line-height: 1;
+  animation: bounce 1.5s ease-in-out infinite;
+}
+
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-20rpx); }
+}
+
+.role-assign-text {
+  font-size: 32rpx;
+  font-weight: 700;
+  color: #667eea;
+}
+
+.role-assign-tip {
+  font-size: 26rpx;
+  color: #333;
+  text-align: center;
+}
+
+.role-assign-countdown {
+  font-size: 22rpx;
+  color: #888;
+  text-align: center;
+}
+
+/* 讨论阶段 */
+.phase-discussing {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 12rpx;
+}
+
+.discussing-header {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: #333;
+  padding-bottom: 8rpx;
+  border-bottom: 2rpx solid #f0f0f0;
+}
+
+.speech-input-area {
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+}
+
+.submit-speech-btn {
+  height: 60rpx;
+  font-size: 22rpx;
+  border-radius: 8rpx;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+.submit-speech-btn:active {
+  opacity: 0.8;
+}
+
+/* 投票阶段 */
+.phase-voting {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 12rpx;
+}
+
+.voting-header {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: #333;
+}
+
+.voting-tip {
+  font-size: 22rpx;
+  color: #666;
+}
+
+.voting-players {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12rpx;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.vote-player-item {
+  background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
+  border: 2rpx solid #667eea;
+  border-radius: 10rpx;
+  padding: 16rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.vote-player-item:active {
+  background: linear-gradient(135deg, #667eea30 0%, #764ba230 100%);
+  box-shadow: 0 4rpx 12rpx rgba(102, 126, 234, 0.3);
+}
+
+.vote-player-item.disabled {
+  background: #f5f5f5;
+  border-color: #ddd;
+  color: #999;
+}
+
+.vote-seat {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: #667eea;
+}
+
+.vote-player-item.disabled .vote-seat {
+  color: #ccc;
+}
+
+/* 晚上行动 */
+.phase-night {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 16rpx;
+  justify-content: center;
+  align-items: center;
+}
+
+.night-header {
+  font-size: 32rpx;
+  font-weight: 600;
+  color: #333;
+}
+
+.night-tip {
+  font-size: 22rpx;
+  color: #666;
+}
+
+.night-action-info {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+  width: 100%;
+  background: #fafafa;
+  border-radius: 10rpx;
+  padding: 20rpx;
+  box-sizing: border-box;
+  text-align: center;
+  flex: 1;
+}
+
+.night-action-info text {
+  font-size: 24rpx;
+  color: #333;
+  line-height: 1.5;
+}
+
+/* 结果展示 */
+.phase-result {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 20rpx;
+  justify-content: center;
+  align-items: center;
+}
+
+.result-header {
+  font-size: 32rpx;
+  font-weight: 700;
+  color: #333;
+}
+
+.result-tip {
+  font-size: 24rpx;
+  color: #666;
+}
+
+/* 游戏结束 */
+.phase-game-over {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 20rpx;
+  justify-content: center;
+  align-items: center;
+  background: linear-gradient(135deg, rgba(255, 215, 0, 0.1) 0%, rgba(102, 126, 234, 0.1) 100%);
+  border-radius: 12rpx;
+  padding: 24rpx;
+  box-sizing: border-box;
+}
+
+.game-over-icon {
+  font-size: 80rpx;
+  line-height: 1;
+  animation: celebrate 0.6s ease-in-out infinite;
+}
+
+@keyframes celebrate {
+  0%, 100% { transform: scale(1) rotate(0deg); }
+  50% { transform: scale(1.1) rotate(5deg); }
+}
+
+.game-over-text {
+  font-size: 32rpx;
+  font-weight: 700;
+  color: #333;
+}
+
