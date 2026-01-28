@@ -36,6 +36,9 @@ wheels/
 logs/
 *.log
 
+# 配置文件
+config.json
+
 # 环境变量
 .env
 .env.local

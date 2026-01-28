@@ -1,6 +1,6 @@
 """
-游戏 API 路由
-处理所有游戏相关的 HTTP 请求
+游戏 API 路由（重构版）
+使用状态机架构处理所有游戏相关的 HTTP 请求
 """
 import logging
 
@@ -12,6 +12,7 @@ bp = Blueprint('game', __name__, url_prefix='/api/rooms')
 # 获取日志记录器
 logger = logging.getLogger('api')
 
+
 # ============== 辅助函数 ==============
 
 def success_response(data, message="Success"):
@@ -22,6 +23,7 @@ def success_response(data, message="Success"):
         'data': data
     }), 200
 
+
 def error_response(code, message, data=None):
     """错误响应"""
     return jsonify({
@@ -30,6 +32,7 @@ def error_response(code, message, data=None):
         'data': data
     }), code if code < 500 else 500
 
+
 # ============== API 接口 ==============
 
 @bp.route('/<room_id>/assign-roles', methods=['POST'])
@@ -37,15 +40,22 @@ def assign_roles(room_id):
     """
     分配角色接口
     POST /rooms/{roomId}/assign-roles
+
+    请求体:
+        {
+            "seatCount": 12,
+            "mode": "classic"  // 可选，默认为 classic
+        }
     """
     logger.debug(f"🎮 [assign_roles] 房间: {room_id}")
     try:
         data = request.get_json()
         seat_count = data.get('seatCount', 12)
-        logger.debug(f"📝 [assign_roles] 座位数: {seat_count}")
+        mode = data.get('mode', 'classic')
+        logger.debug(f"📝 [assign_roles] 座位数: {seat_count}, 模式: {mode}")
 
         # 获取或创建游戏
-        game = get_or_create_game(room_id, seat_count)
+        game = get_or_create_game(room_id, mode, seat_count)
         logger.debug(f"✅ [assign_roles] 游戏实例创建/获取成功")
 
         # 分配角色
@@ -62,6 +72,7 @@ def assign_roles(room_id):
     except Exception as e:
         logger.error(f"❌ [assign_roles] 错误: {str(e)}", exc_info=True)
         return error_response(500, f"Error assigning roles: {str(e)}")
+
 
 @bp.route('/<room_id>/state', methods=['GET'])
 def get_game_state(room_id):
@@ -83,10 +94,11 @@ def get_game_state(room_id):
         logger.error(f"❌ [get_state] 错误: {str(e)}", exc_info=True)
         return error_response(500, f"Error getting game state: {str(e)}")
 
+
 @bp.route('/<room_id>/start-round', methods=['POST'])
 def start_round(room_id):
     """
-    开始新阶段
+    推进到下一阶段
     POST /rooms/{roomId}/start-round
     """
     logger.debug(f"⏭️ [start_round] 房间: {room_id}")
@@ -109,11 +121,18 @@ def start_round(room_id):
         logger.error(f"❌ [start_round] 错误: {str(e)}", exc_info=True)
         return error_response(500, f"Error starting round: {str(e)}")
 
+
 @bp.route('/<room_id>/speech', methods=['POST'])
 def submit_speech(room_id):
     """
     提交发言
     POST /rooms/{roomId}/speech
+
+    请求体:
+        {
+            "seat": 1,
+            "text": "我的发言内容"
+        }
     """
     data = request.get_json()
     seat = data.get('seat')
@@ -129,6 +148,11 @@ def submit_speech(room_id):
             logger.warning(f"⚠️ [speech] 房间不存在: {room_id}")
             return error_response(404, f"Game room {room_id} not found")
 
+        success = game.submit_speech(seat, text)
+        if not success:
+            logger.warning(f"⚠️ [speech] 发言提交失败")
+            return error_response(400, "Failed to submit speech")
+
         logger.info(f"✅ [speech] 发言记录: {seat}号说: {text}")
         response = {
             'success': True,
@@ -139,11 +163,18 @@ def submit_speech(room_id):
         logger.error(f"❌ [speech] 错误: {str(e)}", exc_info=True)
         return error_response(500, f"Error submitting speech: {str(e)}")
 
+
 @bp.route('/<room_id>/vote', methods=['POST'])
 def submit_vote(room_id):
     """
     提交投票
     POST /rooms/{roomId}/vote
+
+    请求体:
+        {
+            "voterSeat": 1,
+            "targetSeat": 2
+        }
     """
     data = request.get_json()
     voter_seat = data.get('voterSeat')
@@ -172,11 +203,20 @@ def submit_vote(room_id):
         logger.error(f"❌ [vote] 错误: {str(e)}", exc_info=True)
         return error_response(500, f"Error submitting vote: {str(e)}")
 
+
 @bp.route('/<room_id>/night-action', methods=['POST'])
 def submit_night_action(room_id):
     """
     提交晚上行动
     POST /rooms/{roomId}/night-action
+
+    请求体:
+        {
+            "playerSeat": 1,
+            "role": "werewolf",
+            "actionType": "kill",
+            "targetSeat": 2
+        }
     """
     data = request.get_json()
     player_seat = data.get('playerSeat')
@@ -207,6 +247,7 @@ def submit_night_action(room_id):
         logger.error(f"❌ [night_action] 错误: {str(e)}", exc_info=True)
         return error_response(500, f"Error submitting night action: {str(e)}")
 
+
 @bp.route('/<room_id>/messages', methods=['GET'])
 def get_game_messages(room_id):
     """
@@ -222,31 +263,20 @@ def get_game_messages(room_id):
             return error_response(404, f"Game room {room_id} not found")
 
         # 获取消息列表
+        all_messages = game.get_messages()
         messages = []
+
         if last_message_id:
             # 获取某个消息之后的所有消息
             found = False
-            for msg in game.game_state.messages:
+            for msg in all_messages:
                 if found:
-                    messages.append({
-                        'id': msg.id,
-                        'timestamp': msg.timestamp,
-                        'type': msg.type,
-                        'content': msg.content
-                    })
-                if msg.id == last_message_id:
+                    messages.append(msg)
+                if msg['id'] == last_message_id:
                     found = True
         else:
             # 获取所有消息
-            messages = [
-                {
-                    'id': msg.id,
-                    'timestamp': msg.timestamp,
-                    'type': msg.type,
-                    'content': msg.content
-                }
-                for msg in game.game_state.messages
-            ]
+            messages = all_messages
 
         logger.debug(f"📤 [messages] 返回 {len(messages)} 条消息")
         response = {
@@ -257,11 +287,44 @@ def get_game_messages(room_id):
         logger.error(f"❌ [messages] 错误: {str(e)}", exc_info=True)
         return error_response(500, f"Error getting messages: {str(e)}")
 
+
+@bp.route('/<room_id>/complete-announcement', methods=['POST'])
+def complete_announcement(room_id):
+    """
+    清除播报信息（前端播报完成后调用）
+    POST /rooms/{roomId}/complete-announcement
+    """
+    logger.debug(f"✅ [complete_announcement] 房间: {room_id}")
+    try:
+        game = get_game(room_id)
+        if not game:
+            logger.warning(f"⚠️ [complete_announcement] 房间不存在: {room_id}")
+            return error_response(404, f"Game room {room_id} not found")
+
+        # 清除播报信息（播报是附加信息，不影响游戏状态）
+        game.state_machine.context.extensions.pop('announcement', None)
+        game.state_machine.context.extensions.pop('announcement_time', None)
+
+        logger.info(f"✅ [complete_announcement] 播报信息已清除")
+        response = {
+            'success': True
+        }
+        return success_response(response, "Announcement completed successfully")
+    except Exception as e:
+        logger.error(f"❌ [complete_announcement] 错误: {str(e)}", exc_info=True)
+        return error_response(500, f"Error completing announcement: {str(e)}")
+
+
 @bp.route('/<room_id>/agent-speech', methods=['POST'])
 def get_agent_speech(room_id):
     """
     获取 Agent 发言
     POST /rooms/{roomId}/agent-speech
+
+    请求体:
+        {
+            "seat": 1
+        }
     """
     data = request.get_json()
     seat = data.get('seat')
@@ -272,25 +335,9 @@ def get_agent_speech(room_id):
             logger.warning(f"⚠️ [agent_speech] 房间不存在: {room_id}")
             return error_response(404, f"Game room {room_id} not found")
 
-        # Agent 发言库
-        speech_library = [
-            '我觉得这一轮大家都表现得很不错。',
-            '我注意到有些人的发言方式有点可疑。',
-            '让我们冷静下来，好好分析一下情况。',
-            '根据今天的讨论，我认为需要投票驱逐某个人。',
-            '大家要相信彼此，团结起来对抗狼人。',
-            '我的直觉告诉我这个人可能有问题。',
-            '让我们投票吧，不要浪费时间。',
-            '我赞同刚才的分析，非常有道理。',
-            '我觉得需要更多的信息来做出判断。',
-            '大家放心，我会尽力保护村民。',
-            '这个发言听起来有点可疑，我需要考虑一下。',
-            '我认为我们应该相信大多数人的投票结果。',
-        ]
-
-        import random
-        speech_text = random.choice(speech_library)
-        logger.info(f"🤖 [agent_speech] {seat}号Agent发言: {speech_text}")
+        # 使用大模型生成发言
+        from agent_decision import generate_agent_speech
+        speech_text = generate_agent_speech(game.state_machine.context, seat)
 
         response = {
             'seat': seat,
@@ -301,6 +348,7 @@ def get_agent_speech(room_id):
     except Exception as e:
         logger.error(f"❌ [agent_speech] 错误: {str(e)}", exc_info=True)
         return error_response(500, f"Error generating agent speech: {str(e)}")
+
 
 @bp.route('/<room_id>/advance-speaker', methods=['POST'])
 def advance_speaker(room_id):
@@ -322,20 +370,73 @@ def advance_speaker(room_id):
         else:
             logger.info(f"✅ [advance_speaker] 推进到下一个发言者")
 
+        # 获取当前发言者
+        state = game.get_state()
+        current_speaker = state.get('currentSpeaker')
+
         response = {
             'success': success,
-            'currentSpeaker': game.game_state.speaking_order[game.game_state.current_speaker_index] if success and game.game_state.speaking_order else None
+            'currentSpeaker': current_speaker
         }
         return success_response(response, "Speaker advanced successfully")
     except Exception as e:
         logger.error(f"❌ [advance_speaker] 错误: {str(e)}", exc_info=True)
         return error_response(500, f"Error advancing speaker: {str(e)}")
 
+
+@bp.route('/<room_id>/agent-vote', methods=['POST'])
+def agent_vote(room_id):
+    """
+    Agent 投票
+    POST /rooms/{roomId}/agent-vote
+
+    请求体:
+    {
+      "seat": 1
+    }
+    """
+    logger.debug(f"🗳️ [agent_vote] 房间: {room_id}")
+    try:
+        game = get_game(room_id)
+        if not game:
+            logger.warning(f"⚠️ [agent_vote] 房间不存在: {room_id}")
+            return error_response(404, f"Game room {room_id} not found")
+
+        data = request.get_json()
+        seat = data.get('seat')
+
+        if not seat:
+            logger.warning(f"⚠️ [agent_vote] 缺少座位号")
+            return error_response(400, "Missing seat number")
+
+        # Agent 投票
+        success, message, result = game.agent_vote(seat)
+
+        if not success:
+            logger.warning(f"⚠️ [agent_vote] 投票失败: {message}")
+            return error_response(400, message)
+
+        logger.info(f"✅ [agent_vote] Agent {seat}号 投票给 {result.get('targetSeat')}")
+
+        return success_response(result, "Agent voted successfully")
+
+    except Exception as e:
+        logger.error(f"❌ [agent_vote] 错误: {str(e)}", exc_info=True)
+        return error_response(500, str(e))
+
+
 @bp.route('/<room_id>/agent-action', methods=['POST'])
 def get_agent_action(room_id):
     """
     获取 Agent 晚上行动
     POST /rooms/{roomId}/agent-action
+
+    请求体:
+        {
+            "seat": 1,
+            "role": "werewolf",
+            "availableTargets": [2, 3, 4]
+        }
     """
     data = request.get_json()
     seat = data.get('seat')
@@ -352,41 +453,27 @@ def get_agent_action(room_id):
             logger.warning(f"⚠️ [agent_action] 没有可用的目标")
             return error_response(400, "No available targets")
 
-        import random
+        # 使用智能决策系统
+        from agent_decision import decide_agent_action
 
-        # 根据角色生成不同的行动
-        action_type = 'kill'  # 默认行动类型
+        # 获取游戏状态上下文
+        state_machine = game.state_machine
+        context = state_machine.context
 
-        if role == 'werewolf':
-            action_type = 'kill'
-            target_seat = random.choice(available_targets)
-            logger.info(f"🐺 [agent_action] {seat}号狼人选择杀死{target_seat}号")
-        elif role == 'seer':
-            action_type = 'check'
-            target_seat = random.choice(available_targets)
-            logger.info(f"🔮 [agent_action] {seat}号预言家选择检查{target_seat}号")
-        elif role == 'witch':
-            # 女巫随机选择救人或下毒
-            action_type = random.choice(['save', 'save'])  # 倾向于救人
-            target_seat = random.choice(available_targets)
-            logger.info(f"🧙 [agent_action] {seat}号女巫选择{action_type}{target_seat}号")
-        elif role == 'hunter':
-            action_type = 'kill'
-            target_seat = random.choice(available_targets) if available_targets else None
-            logger.info(f"🏹 [agent_action] {seat}号猎人选择开枪{target_seat}号")
-        else:
-            target_seat = random.choice(available_targets) if available_targets else None
+        # 让 Agent 做出决策
+        decision = decide_agent_action(room_id, seat, role, available_targets, context)
 
         response = {
-            'seat': seat,
-            'actionType': action_type,
-            'targetSeat': target_seat
+            'seat': decision['seat'],
+            'actionType': decision['actionType'],
+            'targetSeat': decision['targetSeat']
         }
-        logger.debug(f"📤 [agent_action] 返回响应: {response}")
+        logger.debug(f"📤 [agent_action] 返回响应: {response}, 原因: {decision.get('reason', '')}")
         return success_response(response, "Agent action generated successfully")
     except Exception as e:
         logger.error(f"❌ [agent_action] 错误: {str(e)}", exc_info=True)
         return error_response(500, f"Error generating agent action: {str(e)}")
+
 
 @bp.route('/<room_id>/health', methods=['GET'])
 def health_check(room_id):
