@@ -80,7 +80,6 @@ def get_game_state(room_id):
     获取游戏状态
     GET /rooms/{roomId}/state
     """
-    logger.debug(f"📊 [get_state] 房间: {room_id}")
     try:
         game = get_game(room_id)
         if not game:
@@ -88,7 +87,6 @@ def get_game_state(room_id):
             return error_response(404, f"Game room {room_id} not found")
 
         state = game.get_state()
-        logger.debug(f"📤 [get_state] 游戏状态: {state}")
         return success_response(state, "Game state retrieved successfully")
     except Exception as e:
         logger.error(f"❌ [get_state] 错误: {str(e)}", exc_info=True)
@@ -328,12 +326,15 @@ def get_agent_speech(room_id):
     """
     data = request.get_json()
     seat = data.get('seat')
-    logger.debug(f"🤖 [agent_speech] 房间: {room_id}, Agent座位: {seat}号")
     try:
         game = get_game(room_id)
         if not game:
             logger.warning(f"⚠️ [agent_speech] 房间不存在: {room_id}")
             return error_response(404, f"Game room {room_id} not found")
+
+        context = game.state_machine.context
+        current_speaker = context.extensions.get('currentSpeaker', 0)
+        logger.debug(f"🤖 [agent_speech] 房间: {room_id}, 请求座位: {seat}号, 当前发言者: {current_speaker}号")
 
         # 使用大模型生成发言
         from agent_decision import generate_agent_speech

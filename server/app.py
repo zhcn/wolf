@@ -38,7 +38,7 @@ file_handler.setFormatter(logging.Formatter(log_format))
 
 # 创建控制台处理器
 console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.INFO)
+console_handler.setLevel(logging.DEBUG)
 console_handler.setFormatter(logging.Formatter(log_format))
 
 # 配置应用日志

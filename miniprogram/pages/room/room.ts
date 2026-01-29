@@ -110,6 +110,12 @@ Component({
 
     // 防止重复弹窗标志
     _showingAnnouncement: false,
+
+    // 跟踪已处理过的发言者
+    _processedSpeakers: [] as number[],
+
+    // 跟踪前一阶段，用于检测阶段切换
+    _lastGamePhase: '' as string,
   },
   lifetimes: {
     attached() {
@@ -231,15 +237,16 @@ Component({
           const self = this
 
           // 防止重复弹窗
-          if (!this._showingAnnouncement) {
-            this._showingAnnouncement = true
+          if (!(this as any)._showingAnnouncement) {
+            (this as any)._showingAnnouncement = true
             wx.showModal({
               title: '提示',
               content: announcement,
               showCancel: false,
-              async success() {
-                self._showingAnnouncement = false
+              success: async () => {
                 // 播报完成后，调用后端清除播报信息
+                (self as any)._showingAnnouncement = false
+
                 try {
                   await completeAnnouncement({ roomId: self.data.roomId })
                 } catch (e) {
@@ -260,9 +267,25 @@ Component({
           }
         }
 
+        // 检测阶段切换，只在进入新阶段时执行初始化
+        const lastPhase = (this as any)._lastGamePhase || ''
+        const currentPhase = gameData.phase
+        let phaseChanged = false
+        if (lastPhase !== currentPhase) {
+          phaseChanged = true
+        }
+
+        // 立即更新前一阶段记录，防止异步轮询重复检测切换
+        (this as any)._lastGamePhase = currentPhase
+
         // 根据不同阶段执行不同的操作
-        switch (gameData.phase) {
+        switch (currentPhase) {
           case 'day_discussion':
+            // 只在首次进入白天讨论阶段时清空已处理过的发言者
+            if (phaseChanged) {
+              console.log(`[pollGameState] 阶段切换到 day_discussion，清空已处理列表`)
+              this.setData({ _processedSpeakers: [] })
+            }
             await this.handleDayDiscussion(gameData)
             break
           case 'day_voting':
@@ -398,38 +421,49 @@ Component({
       const currentSpeaker = gameData.currentSpeaker || 0
       const mySeat = this.data.mySeat
 
-      // 如果当前发言者是 Agent，获取并显示 Agent 的发言
-      if (currentSpeaker !== mySeat && this.data.alivePlayers.includes(currentSpeaker)) {
-        const player = this.data.players.find(p => p.seat === currentSpeaker)
-        if (player && !player.isMe) {
-          // 这是 Agent，获取其发言
-          try {
-            const agentSpeech = await getAgentSpeech({
-              roomId: this.data.roomId,
-              seat: currentSpeaker,
-            })
+      // 检查是否已经处理过该发言者
+      const processedSpeakers = this.data._processedSpeakers || []
+      console.log(`[handleDayDiscussion] 当前发言者: ${currentSpeaker}, 已处理:`, processedSpeakers)
 
-            // 添加到本地发言列表
-            const now = formatTime(new Date())
-            const speech: Speech = {
-              id: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
-              seat: currentSpeaker,
-              at: now,
-              text: agentSpeech.text,
-            }
+      if (currentSpeaker !== 0 && !processedSpeakers.includes(currentSpeaker)) {
+        // 添加到已处理列表
+        const newProcessedSpeakers = [...processedSpeakers, currentSpeaker]
+        console.log(`[handleDayDiscussion] 将 ${currentSpeaker} 号添加到已处理列表`)
+        this.setData({ _processedSpeakers: newProcessedSpeakers })
 
-            // 检查是否已经存在该发言
-            const exists = this.data.speeches.some(s => s.text === speech.text && s.seat === speech.seat)
-            if (!exists) {
-              this.setData({
-                speeches: [speech, ...this.data.speeches],
+        // 如果当前发言者是 Agent，获取并显示 Agent 的发言
+        if (currentSpeaker !== mySeat && this.data.alivePlayers.includes(currentSpeaker)) {
+          const player = this.data.players.find(p => p.seat === currentSpeaker)
+          if (player && !player.isMe) {
+            // 这是 Agent，获取其发言
+            try {
+              const agentSpeech = await getAgentSpeech({
+                roomId: this.data.roomId,
+                seat: currentSpeaker,
               })
-            }
 
-            // 推进到下一个发言者
-            await advanceSpeaker({ roomId: this.data.roomId })
-          } catch (e) {
-            console.error('获取 Agent 发言失败:', e)
+              // 添加到本地发言列表
+              const now = formatTime(new Date())
+              const speech: Speech = {
+                id: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
+                seat: currentSpeaker,
+                at: now,
+                text: agentSpeech.text,
+              }
+
+              // 检查是否已经存在该发言
+              const exists = this.data.speeches.some(s => s.text === speech.text && s.seat === speech.seat)
+              if (!exists) {
+                this.setData({
+                  speeches: [speech, ...this.data.speeches],
+                })
+              }
+
+              // 推进到下一个发言者
+              await advanceSpeaker({ roomId: this.data.roomId })
+            } catch (e) {
+              console.error('获取 Agent 发言失败:', e)
+            }
           }
         }
       }
