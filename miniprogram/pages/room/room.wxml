@@ -94,12 +94,88 @@
       <!-- 晚上行动阶段 -->
       <view class="phase-night" wx:if="{{phase === 'night'}}">
         <view class="night-header">🌙 晚上行动</view>
-        <text class="night-tip">根据你的角色执行相应的夜间行动</text>
-        <view class="night-action-info">
-          <text wx:if="{{myRole === 'werewolf'}}">狼人正在选择要杀死的目标...</text>
-          <text wx:if="{{myRole === 'seer'}}">预言家正在选择要检查的目标...</text>
-          <text wx:if="{{myRole === 'witch'}}">女巫正在检查今晚的情况...</text>
-          <text wx:if="{{myRole === 'hunter' || myRole === 'villager'}}">请稍候，其他角色正在行动中...</text>
+        <text class="night-tip">{{nightPhaseTip}}</text>
+
+        <!-- 等待其他角色行动 -->
+        <view class="night-waiting" wx:if="{{!isMyTurn}}">
+          <view class="waiting-role">🎭</view>
+          <text class="waiting-text">{{waitingText}}</text>
+        </view>
+
+        <!-- 轮到我的角色 -->
+        <view class="night-action" wx:if="{{isMyTurn}}">
+          <!-- 狼人选择击杀目标 -->
+          <view wx:if="{{myRole === 'werewolf'}}" class="action-panel">
+            <text class="action-title">🐺 选择击杀目标</text>
+            <view class="action-targets">
+              <view
+                class="target-item {{item === selectedNightTarget ? 'selected' : ''}}"
+                wx:for="{{alivePlayers}}"
+                wx:key="*this"
+                bindtap="selectNightTarget"
+                data-target="{{item}}">
+                <view class="target-seat">{{item}}号</view>
+              </view>
+            </view>
+            <button class="action-btn" bindtap="submitNightAction" disabled="{{!selectedNightTarget}}">
+              {{selectedNightTarget ? '击杀 ' + selectedNightTarget + '号' : '选择目标'}}
+            </button>
+          </view>
+
+          <!-- 预言家查验目标 -->
+          <view wx:if="{{myRole === 'seer'}}" class="action-panel">
+            <text class="action-title">🔮 选择查验目标</text>
+            <view class="action-targets">
+              <view
+                class="target-item {{item === selectedNightTarget ? 'selected' : ''}}"
+                wx:for="{{alivePlayers}}"
+                wx:key="*this"
+                bindtap="selectNightTarget"
+                data-target="{{item}}">
+                <view class="target-seat">{{item}}号</view>
+              </view>
+            </view>
+            <button class="action-btn" bindtap="submitNightAction" disabled="{{!selectedNightTarget}}">
+              {{selectedNightTarget ? '查验 ' + selectedNightTarget + '号' : '选择目标'}}
+            </button>
+          </view>
+
+          <!-- 女巫选择药水 -->
+          <view wx:if="{{myRole === 'witch'}}" class="action-panel">
+            <text class="action-title">🧙 选择药水</text>
+            <view class="witch-options">
+              <view
+                class="option-btn {{selectedWitchAction === 'save' ? 'selected' : ''}}"
+                bindtap="selectWitchAction"
+                data-action="save">
+                <view class="option-icon">💊</view>
+                <view class="option-text">使用解药</view>
+              </view>
+              <view
+                class="option-btn {{selectedWitchAction === 'poison' ? 'selected' : ''}}"
+                bindtap="selectWitchAction"
+                data-action="poison">
+                <view class="option-icon">☠️</view>
+                <view class="option-text">使用毒药</view>
+              </view>
+              <view
+                class="option-btn {{selectedWitchAction === 'none' ? 'selected' : ''}}"
+                bindtap="selectWitchAction"
+                data-action="none">
+                <view class="option-icon">⏸️</view>
+                <view class="option-text">不使用</view>
+              </view>
+            </view>
+            <button class="action-btn" bindtap="submitNightAction" disabled="{{!selectedWitchAction || selectedWitchAction === 'none'}}">
+              {{getWitchActionText()}}
+            </button>
+          </view>
+
+          <!-- 猎人、村民等待 -->
+          <view wx:if="{{myRole === 'hunter' || myRole === 'villager'}}" class="action-panel">
+            <text class="action-title">⏳ 等待其他角色行动</text>
+            <text class="waiting-detail">狼人、女巫、预言家正在行动中...</text>
+          </view>
         </view>
       </view>
 

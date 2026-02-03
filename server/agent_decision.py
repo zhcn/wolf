@@ -4,7 +4,7 @@ Agent 决策系统
 为不同角色的 AI Agent 提供智能决策，根据游戏上下文做出合理行动。
 每个角色只能根据自己的视角信息进行决策。
 """
-
+import logging
 import random
 from typing import List, Dict, Optional
 
@@ -15,15 +15,17 @@ from config import OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL
 from state_machines import Role
 from state_machines.state_context import GameStateContext
 
+logger = logging.getLogger('agent_decision')
+
 # 初始化 OpenAI 客户端
 try:
     llm_client = openai.OpenAI(
         api_key=OPENAI_API_KEY,
         base_url=OPENAI_BASE_URL
     )
-    print(f"✅ 已初始化大模型客户端: {OPENAI_MODEL}")
+    logger.info(f"已初始化大模型客户端: {OPENAI_MODEL}")
 except Exception as e:
-    print(f"❌ 大模型客户端初始化失败: {str(e)}")
+    logger.error(f"大模型客户端初始化失败: {str(e)}")
     llm_client = None
 
 
@@ -75,13 +77,13 @@ def generate_agent_speech(context: GameStateContext, seat: int) -> str:
     action_info = ""
     if agent.role == Role.WEREWOLF:
         # 狼人：知道昨晚杀的人
-        if context.last_dead_player and context.last_dead_player.killed_by == 'werewolf':
-            action_info = f"\n夜晚行动信息：\n昨晚击杀了{context.last_dead_player.seat}号"
+        if context.last_dead_player and context.last_dead_player.get('killed_by') == 'werewolf':
+            action_info = f"\n夜晚行动信息：\n昨晚击杀了{context.last_dead_player.get('seat', '未知')}号"
     elif agent.role == Role.SEER:
         # 预言家：查看历史
         if context.seer_context:
             action_info = "\n夜晚行动信息：\n" + "\n".join(
-                f"第{c['round']}晚查了{c['seat']}号，结果是{c['result']}"
+                f"第{c.get('round', '?')}晚查了{c.get('seat', '?')}号，结果是{c.get('result', '?')}"
                 for c in context.seer_context
             )
     elif agent.role == Role.WITCH:
@@ -112,7 +114,7 @@ def generate_agent_speech(context: GameStateContext, seat: int) -> str:
 当前轮次：第 {context.round} 轮
 存活玩家：{', '.join(map(str, alive_players))}
 今晚被狼人击杀：{context.werewolf_killed if context.werewolf_killed else '无'}号
-昨晚死亡：{context.last_dead_player.seat if context.last_dead_player else '无'}号（{context.last_dead_player.killed_by if context.last_dead_player else 'N/A'}）
+昨晚死亡：{context.last_dead_player.get('seat', '无') if context.last_dead_player else '无'}号（{context.last_dead_player.get('killed_by', 'N/A') if context.last_dead_player else 'N/A'}）
 {action_info}
 
 【历史对话】（最近10条）
@@ -138,7 +140,7 @@ def generate_agent_speech(context: GameStateContext, seat: int) -> str:
 
     speech = response.choices[0].message.content.strip()
 
-    print(f"🗣️ Agent {seat} ({role_name}) 发言: {speech}")
+    logger.debug(f"Agent {seat} ({role_name}) 发言: {speech}")
     return speech
 
 
@@ -187,13 +189,13 @@ class AgentDecision:
         targets_str = ', '.join(map(str, available_targets))
 
         # 获取历史对话消息
-        messages_history = self.context.get_all_messages()
+        messages_history = self.context.messages
 
         # 构建历史对话文本
         history_text = ""
         if messages_history:
             history_text = "\n历史对话：\n" + "\n".join(
-                f"[Round {msg.round}] {msg.message}" for msg in messages_history
+                f"[Round {msg.content.get('round', '?')}] {msg.content.get('message', '')}" for msg in messages_history
             )
 
         prompt = f"""你是一个狼人杀游戏的玩家。
@@ -251,7 +253,7 @@ class AgentDecision:
             target = random.choice(available_targets)
             result['reason'] = f"{result.get('reason', '')}（目标无效，随机选择）"
 
-        print(f"🧠 大模型决策: {decision_type}, 目标: {target}, 原因: {result.get('reason', '')}")
+        logger.debug(f"大模型决策: {decision_type}, 目标: {target}, 原因: {result.get('reason', '')}")
         return result
 
 
@@ -260,78 +262,104 @@ class WerewolfAgent(AgentDecision):
 
     def get_known_teammates(self) -> List[int]:
         """获取所有狼人队友"""
-        teammates = []
-        for seat, player in self.context.players.items():
-            if seat != self.agent_seat and player.alive and player.role == Role.WEREWOLF:
-                teammates.append(seat)
-        return teammates
+        try:
+            teammates = []
+            for seat, player in self.context.players.items():
+                if seat != self.agent_seat and player.alive and player.role == Role.WEREWOLF:
+                    teammates.append(seat)
+            return teammates
+        except Exception as e:
+            logger.error(f"[WerewolfAgent] get_known_teammates 失败: {str(e)}")
+            return []
 
     def decide_night_action(self, available_targets: List[int]) -> Dict:
         """狼人晚上决策"""
-        teammates = self.get_known_teammates()
-        context_info = f"""当前轮次：第 {self.context.round} 轮
+        try:
+            teammates = self.get_known_teammates()
+            context_info = f"""当前轮次：第 {self.context.round} 轮
 狼人队友：{', '.join(map(str, teammates))}
 存活玩家：{', '.join(map(str, self.context.get_alive_players()))}"""
 
-        llm_result = self.call_llm_decision('night_action', context_info, available_targets)
-        if llm_result:
-            target = llm_result.get('targetSeat')
-            # 确保不杀队友
-            if target not in teammates:
-                return {
-                    'seat': self.agent_seat,
-                    'actionType': 'kill',
-                    'targetSeat': target,
-                    'reason': llm_result.get('reason', '')
-                }
+            llm_result = self.call_llm_decision('night_action', context_info, available_targets)
+            if llm_result:
+                target = llm_result.get('targetSeat')
+                # 确保不杀队友
+                if target not in teammates:
+                    return {
+                        'seat': self.agent_seat,
+                        'actionType': 'kill',
+                        'targetSeat': target,
+                        'reason': llm_result.get('reason', '')
+                    }
 
-        # 大模型不可用或决策无效，使用规则决策
-        targets = [t for t in available_targets if t not in teammates]
-        if not targets:
-            targets = available_targets
+            # 大模型不可用或决策无效，使用规则决策
+            targets = [t for t in available_targets if t not in teammates]
+            if not targets:
+                targets = available_targets
 
-        target = random.choice(targets) if targets else None
-        return {
-            'seat': self.agent_seat,
-            'actionType': 'kill',
-            'targetSeat': target,
-            'reason': '随机击杀'
-        }
+            target = random.choice(targets) if targets else None
+            logger.info(f"[WerewolfAgent] 随机击杀: {target}")
+            return {
+                'seat': self.agent_seat,
+                'actionType': 'kill',
+                'targetSeat': target,
+                'reason': '随机击杀'
+            }
+        except Exception as e:
+            logger.error(f"[WerewolfAgent] decide_night_action 失败: {str(e)}")
+            # 返回随机击杀作为后备
+            return {
+                'seat': self.agent_seat,
+                'actionType': 'kill',
+                'targetSeat': None,
+                'reason': '异常后备决策'
+            }
 
     def decide_vote(self, available_targets: List[int]) -> Dict:
         """狼人投票决策"""
-        teammates = self.get_known_teammates()
-        votes_info = ', '.join(
-            f'{s}号投给{p.voted_for}' for s, p in self.context.players.items()
-            if p.alive and p.voted_for
-        )
-        context_info = f"""当前轮次：第 {self.context.round} 轮
+        try:
+            teammates = self.get_known_teammates()
+            votes_info = ', '.join(
+                f'{s}号投给{p.voted_for}' for s, p in self.context.players.items()
+                if p.alive and p.voted_for
+            )
+            context_info = f"""当前轮次：第 {self.context.round} 轮
 狼人队友：{', '.join(map(str, teammates))}
 存活玩家：{', '.join(map(str, self.context.get_alive_players()))}
 已投票情况：{votes_info if votes_info else '暂无'}"""
 
-        llm_result = self.call_llm_decision('vote', context_info, available_targets)
-        if llm_result:
-            target = llm_result.get('targetSeat')
-            # 确保不投队友
-            if target not in teammates:
-                return {
-                    'voterSeat': self.agent_seat,
-                    'targetSeat': target,
-                    'reason': llm_result.get('reason', '')
-                }
+            llm_result = self.call_llm_decision('vote', context_info, available_targets)
+            if llm_result:
+                target = llm_result.get('targetSeat')
+                # 确保不投队友
+                if target not in teammates:
+                    return {
+                        'voterSeat': self.agent_seat,
+                        'targetSeat': target,
+                        'reason': llm_result.get('reason', '')
+                    }
 
-        # 大模型不可用或决策无效，使用规则决策
-        targets = [t for t in available_targets if t not in teammates]
-        if not targets:
-            targets = available_targets
+            # 大模型不可用或决策无效，使用规则决策
+            targets = [t for t in available_targets if t not in teammates]
+            if not targets:
+                targets = available_targets
 
-        target = random.choice(targets) if targets else None
-        return {
-            'voterSeat': self.agent_seat,
-            'targetSeat': target,
-            'reason': '随机投票'
-        }
+            target = random.choice(targets) if targets else None
+            return {
+                'voterSeat': self.agent_seat,
+                'targetSeat': target,
+                'reason': '随机投票'
+            }
+        except Exception as e:
+            logger.error(f"[WerewolfAgent] decide_vote 失败: {str(e)}", exc_info=True)
+            # 返回随机投票作为后备
+            targets = [t for t in available_targets if t != self.agent_seat]
+            target = random.choice(targets) if targets else None
+            return {
+                'voterSeat': self.agent_seat,
+                'targetSeat': target,
+                'reason': '异常后备决策'
+            }
 
 
 class SeerAgent(AgentDecision):
@@ -343,46 +371,56 @@ class SeerAgent(AgentDecision):
 
     def decide_night_action(self, available_targets: List[int]) -> Dict:
         """预言家晚上决策"""
-        checked_seats = [check['seat'] for check in self.checked_history]
-        context_info = f"""当前轮次：第 {self.context.round} 轮
+        try:
+            checked_seats = [check.get('seat') for check in self.checked_history if check.get('seat') is not None]
+            context_info = f"""当前轮次：第 {self.context.round} 轮
 已查验过的玩家：{', '.join(map(str, checked_seats)) if checked_seats else '无'}
 存活玩家：{', '.join(map(str, self.context.get_alive_players()))}"""
 
-        llm_result = self.call_llm_decision('night_action', context_info, available_targets)
-        if llm_result:
-            target = llm_result.get('targetSeat')
-            # 确保不重复查验
-            if target not in checked_seats:
-                self.checked_history.append({
-                    'seat': target,
-                    'round': self.context.round,
-                })
-                return {
-                    'seat': self.agent_seat,
-                    'actionType': 'check',
-                    'targetSeat': target,
-                    'reason': llm_result.get('reason', '')
-                }
+            llm_result = self.call_llm_decision('night_action', context_info, available_targets)
+            if llm_result:
+                target = llm_result.get('targetSeat')
+                # 确保不重复查验
+                if target not in checked_seats:
+                    self.checked_history.append({
+                        'seat': target,
+                        'round': self.context.round,
+                    })
+                    return {
+                        'seat': self.agent_seat,
+                        'actionType': 'check',
+                        'targetSeat': target,
+                        'reason': llm_result.get('reason', '')
+                    }
 
-        # 大模型不可用或决策无效，使用规则决策
-        targets = [t for t in available_targets if t not in checked_seats]
-        if not targets:
-            targets = available_targets
+            # 大模型不可用或决策无效，使用规则决策
+            targets = [t for t in available_targets if t not in checked_seats]
+            if not targets:
+                targets = available_targets
 
-        target = random.choice(targets) if targets else None
+            target = random.choice(targets) if targets else None
 
-        # 记录查验
-        self.checked_history.append({
-            'seat': target,
-            'round': self.context.round,
-        })
-
-        return {
-            'seat': self.agent_seat,
-            'actionType': 'check',
-            'targetSeat': target,
-            'reason': '查验未知身份'
-        }
+            # 记录查验
+            self.checked_history.append({
+                'seat': target,
+                'round': self.context.round,
+            })
+            logger.info(f"[SeerAgent] 查验 {target}")
+            return {
+                'seat': self.agent_seat,
+                'actionType': 'check',
+                'targetSeat': target,
+                'reason': '查验未知身份'
+            }
+        except Exception as e:
+            logger.error(f"[SeerAgent] decide_night_action 失败: {str(e)}", exc_info=True)
+            # 返回随机查验作为后备
+            return {
+                'seat': self.agent_seat,
+                'actionType': 'check',
+                'targetSeat': None,
+                'reason': '异常后备决策'
+            }
 
     def get_checked_history(self) -> List[Dict]:
         """获取查验历史（用于后续发言）"""
@@ -390,23 +428,37 @@ class SeerAgent(AgentDecision):
 
     def decide_vote(self, available_targets: List[int]) -> Dict:
         """预言家投票决策"""
-        # 查找已知的狼人（如果查到了）
-        for check in self.checked_history:
-            checked_player = self.context.players.get(check['seat'])
-            if checked_player and checked_player.role == Role.WEREWOLF:
-                return {
-                    'voterSeat': self.agent_seat,
-                    'targetSeat': check['seat'],
-                    'reason': '投已知狼人'
-                }
+        try:
+            # 查找已知的狼人（如果查到了）
+            for check in self.checked_history:
+                seat = check.get('seat')
+                if seat is None:
+                    continue
+                checked_player = self.context.players.get(seat)
+                if checked_player and checked_player.role == Role.WEREWOLF:
+                    return {
+                        'voterSeat': self.agent_seat,
+                        'targetSeat': seat,
+                        'reason': '投已知狼人'
+                    }
 
-        # 没有已知狼人，随机投票
-        target = random.choice(available_targets) if available_targets else None
-        return {
-            'voterSeat': self.agent_seat,
-            'targetSeat': target,
-            'reason': '随机投票'
-        }
+            # 没有已知狼人，随机投票
+            target = random.choice(available_targets) if available_targets else None
+            return {
+                'voterSeat': self.agent_seat,
+                'targetSeat': target,
+                'reason': '随机投票'
+            }
+        except Exception as e:
+            logger.error(f"[SeerAgent] decide_vote 失败: {str(e)}", exc_info=True)
+            # 返回随机投票作为后备
+            targets = [t for t in available_targets if t != self.agent_seat]
+            target = random.choice(targets) if targets else None
+            return {
+                'voterSeat': self.agent_seat,
+                'targetSeat': target,
+                'reason': '异常后备决策'
+            }
 
 
 class WitchAgent(AgentDecision):
@@ -420,68 +472,78 @@ class WitchAgent(AgentDecision):
 
     def decide_night_action(self, available_targets: List[int]) -> Dict:
         """女巫晚上决策"""
-        werewolf_killed = self.context.werewolf_killed
+        try:
+            werewolf_killed = self.context.werewolf_killed
 
-        # 先尝试使用大模型决策
-        context_info = f"""当前轮次：第 {self.context.round} 轮
+            # 先尝试使用大模型决策
+            context_info = f"""当前轮次：第 {self.context.round} 轮
 今晚被狼人击杀：{werewolf_killed}号{f'（已死亡）' if werewolf_killed else '无'}
 存活玩家：{', '.join(map(str, self.context.get_alive_players()))}
 解药状态：{'有' if self.has_save_potion else '已使用'}
 毒药状态：{'有' if self.has_poison_potion else '已使用'}
 救过的玩家：{', '.join(map(str, self.saved_history)) if self.saved_history else '无'}"""
 
-        llm_result = self.call_llm_decision('night_action', context_info, available_targets)
-        if llm_result:
-            target = llm_result.get('targetSeat')
+            llm_result = self.call_llm_decision('night_action', context_info, available_targets)
+            if llm_result:
+                target = llm_result.get('targetSeat')
 
-            # 大模型决策处理
-            if target is None or target == werewolf_killed:
-                # 救人或不使用
-                if werewolf_killed and self.has_save_potion and target == werewolf_killed:
-                    self.has_save_potion = False
-                    self.saved_history.append(werewolf_killed)
+                # 大模型决策处理
+                if target is None or target == werewolf_killed:
+                    # 救人或不使用
+                    if werewolf_killed and self.has_save_potion and target == werewolf_killed:
+                        self.has_save_potion = False
+                        self.saved_history.append(werewolf_killed)
+                        return {
+                            'seat': self.agent_seat,
+                            'actionType': 'save',
+                            'targetSeat': werewolf_killed,
+                            'reason': llm_result.get('reason', '')
+                        }
+                    else:
+                        return {
+                            'seat': self.agent_seat,
+                            'actionType': 'save',
+                            'targetSeat': None,
+                            'reason': llm_result.get('reason', '')
+                        }
+                elif self.has_poison_potion and target in available_targets:
+                    # 毒人
+                    self.has_poison_potion = False
                     return {
                         'seat': self.agent_seat,
-                        'actionType': 'save',
-                        'targetSeat': werewolf_killed,
+                        'actionType': 'poison',
+                        'targetSeat': target,
                         'reason': llm_result.get('reason', '')
                     }
-                else:
-                    return {
-                        'seat': self.agent_seat,
-                        'actionType': 'save',
-                        'targetSeat': None,
-                        'reason': llm_result.get('reason', '')
-                    }
-            elif self.has_poison_potion and target in available_targets:
-                # 毒人
-                self.has_poison_potion = False
+
+            # 大模型不可用或决策无效，使用规则决策
+            # 如果有人被杀，且还有解药
+            if werewolf_killed and self.has_save_potion:
+                self.has_save_potion = False
+                self.saved_history.append(werewolf_killed)
                 return {
                     'seat': self.agent_seat,
-                    'actionType': 'poison',
-                    'targetSeat': target,
-                    'reason': llm_result.get('reason', '')
+                    'actionType': 'save',
+                    'targetSeat': werewolf_killed,
+                    'reason': '解药救人'
                 }
 
-        # 大模型不可用或决策无效，使用规则决策
-        # 如果有人被杀，且还有解药
-        if werewolf_killed and self.has_save_potion:
-            self.has_save_potion = False
-            self.saved_history.append(werewolf_killed)
+            # 不使用任何药
             return {
                 'seat': self.agent_seat,
                 'actionType': 'save',
-                'targetSeat': werewolf_killed,
-                'reason': '解药救人'
+                'targetSeat': None,
+                'reason': '不使用药水'
             }
-
-        # 不使用任何药
-        return {
-            'seat': self.agent_seat,
-            'actionType': 'save',
-            'targetSeat': None,
-            'reason': '不使用药水'
-        }
+        except Exception as e:
+            logger.error(f"[WitchAgent] decide_night_action 失败: {str(e)}", exc_info=True)
+            # 返回默认决策：不使用药水
+            return {
+                'seat': self.agent_seat,
+                'actionType': 'save',
+                'targetSeat': None,
+                'reason': '异常后备决策'
+            }
 
     def get_potion_status(self) -> Dict:
         """获取药水状态"""
@@ -493,25 +555,36 @@ class WitchAgent(AgentDecision):
 
     def decide_vote(self, available_targets: List[int]) -> Dict:
         """女巫投票决策"""
-        context_info = f"""当前轮次：第 {self.context.round} 轮
+        try:
+            context_info = f"""当前轮次：第 {self.context.round} 轮
 存活玩家：{', '.join(map(str, self.context.get_alive_players()))}
 救过的玩家：{', '.join(map(str, self.saved_history)) if self.saved_history else '无'}"""
 
-        llm_result = self.call_llm_decision('vote', context_info, available_targets)
-        if llm_result:
+            llm_result = self.call_llm_decision('vote', context_info, available_targets)
+            if llm_result:
+                return {
+                    'voterSeat': self.agent_seat,
+                    'targetSeat': llm_result.get('targetSeat'),
+                    'reason': llm_result.get('reason', '')
+                }
+
+            # 大模型不可用，随机投票
+            target = random.choice(available_targets) if available_targets else None
             return {
                 'voterSeat': self.agent_seat,
-                'targetSeat': llm_result.get('targetSeat'),
-                'reason': llm_result.get('reason', '')
+                'targetSeat': target,
+                'reason': '随机投票'
             }
-
-        # 大模型不可用，随机投票
-        target = random.choice(available_targets) if available_targets else None
-        return {
-            'voterSeat': self.agent_seat,
-            'targetSeat': target,
-            'reason': '随机投票'
-        }
+        except Exception as e:
+            logger.error(f"[WitchAgent] decide_vote 失败: {str(e)}", exc_info=True)
+            # 返回随机投票作为后备
+            targets = [t for t in available_targets if t != self.agent_seat]
+            target = random.choice(targets) if targets else None
+            return {
+                'voterSeat': self.agent_seat,
+                'targetSeat': target,
+                'reason': '异常后备决策'
+            }
 
 
 class HunterAgent(AgentDecision):
@@ -519,21 +592,42 @@ class HunterAgent(AgentDecision):
 
     def decide_night_action(self, available_targets: List[int]) -> Dict:
         """猎人不参与晚上行动"""
-        return {
-            'seat': self.agent_seat,
-            'actionType': 'kill',
-            'targetSeat': None,
-            'reason': '猎人不晚上行动'
-        }
+        try:
+            return {
+                'seat': self.agent_seat,
+                'actionType': 'kill',
+                'targetSeat': None,
+                'reason': '猎人不晚上行动'
+            }
+        except Exception as e:
+            logger.error(f"[HunterAgent] decide_night_action 失败: {str(e)}", exc_info=True)
+            # 返回默认决策
+            return {
+                'seat': self.agent_seat,
+                'actionType': 'kill',
+                'targetSeat': None,
+                'reason': '异常后备决策'
+            }
 
     def decide_vote(self, available_targets: List[int]) -> Dict:
         """猎人投票决策（随机）"""
-        target = random.choice(available_targets) if available_targets else None
-        return {
-            'voterSeat': self.agent_seat,
-            'targetSeat': target,
-            'reason': '随机投票'
-        }
+        try:
+            target = random.choice(available_targets) if available_targets else None
+            return {
+                'voterSeat': self.agent_seat,
+                'targetSeat': target,
+                'reason': '随机投票'
+            }
+        except Exception as e:
+            logger.error(f"[HunterAgent] decide_vote 失败: {str(e)}", exc_info=True)
+            # 返回随机投票作为后备
+            targets = [t for t in available_targets if t != self.agent_seat]
+            target = random.choice(targets) if targets else None
+            return {
+                'voterSeat': self.agent_seat,
+                'targetSeat': target,
+                'reason': '异常后备决策'
+            }
 
 
 class VillagerAgent(AgentDecision):
@@ -541,21 +635,42 @@ class VillagerAgent(AgentDecision):
 
     def decide_night_action(self, available_targets: List[int]) -> Dict:
         """村民不参与晚上行动"""
-        return {
-            'seat': self.agent_seat,
-            'actionType': 'kill',
-            'targetSeat': None,
-            'reason': '村民不晚上行动'
-        }
+        try:
+            return {
+                'seat': self.agent_seat,
+                'actionType': 'kill',
+                'targetSeat': None,
+                'reason': '村民不晚上行动'
+            }
+        except Exception as e:
+            logger.error(f"[VillagerAgent] decide_night_action 失败: {str(e)}", exc_info=True)
+            # 返回默认决策
+            return {
+                'seat': self.agent_seat,
+                'actionType': 'kill',
+                'targetSeat': None,
+                'reason': '异常后备决策'
+            }
 
     def decide_vote(self, available_targets: List[int]) -> Dict:
         """村民投票决策（随机）"""
-        target = random.choice(available_targets) if available_targets else None
-        return {
-            'voterSeat': self.agent_seat,
-            'targetSeat': target,
-            'reason': '随机投票'
-        }
+        try:
+            target = random.choice(available_targets) if available_targets else None
+            return {
+                'voterSeat': self.agent_seat,
+                'targetSeat': target,
+                'reason': '随机投票'
+            }
+        except Exception as e:
+            logger.error(f"[VillagerAgent] decide_vote 失败: {str(e)}", exc_info=True)
+            # 返回随机投票作为后备
+            targets = [t for t in available_targets if t != self.agent_seat]
+            target = random.choice(targets) if targets else None
+            return {
+                'voterSeat': self.agent_seat,
+                'targetSeat': target,
+                'reason': '异常后备决策'
+            }
 
 
 # Agent 实例缓存（保存每个 Agent 的决策上下文）
@@ -628,24 +743,18 @@ def decide_agent_action(room_id: str, seat: int, role: str, available_targets: L
         decision = agent.decide_night_action(available_targets)
 
         # 记录决策日志
-        print(f"🤖 Agent {seat} ({role}) 决策: {decision['actionType']} -> {decision['targetSeat']}, 原因: {decision.get('reason', 'N/A')}")
+        logger.debug(f"Agent {seat} ({role}) 决策: {decision.get('actionType', 'unknown')} -> {decision.get('targetSeat', 'None')}, 原因: {decision.get('reason', 'N/A')}")
 
         return {
             'seat': seat,
-            'actionType': decision['actionType'],
-            'targetSeat': decision['targetSeat'],
+            'actionType': decision.get('actionType', 'kill'),
+            'targetSeat': decision.get('targetSeat'),
             'reason': decision.get('reason', '')
         }
     except Exception as e:
-        print(f"❌ Agent {seat} 决策失败: {str(e)}")
-        # 返回随机决策作为后备
-        target = random.choice(available_targets) if available_targets else None
-        return {
-            'seat': seat,
-            'actionType': 'kill' if role == 'werewolf' else 'check',
-            'targetSeat': target,
-            'reason': '随机决策（后备）'
-        }
+        logger.error(f"Agent {seat} 决策失败: {str(e)}", exc_info=True)
+        # 重新抛出异常，让上层处理
+        raise
 
 
 def decide_agent_vote(room_id: str, seat: int, available_targets: List[int], context: GameStateContext) -> Dict:
@@ -666,20 +775,15 @@ def decide_agent_vote(room_id: str, seat: int, available_targets: List[int], con
         decision = agent.decide_vote(available_targets)
 
         # 记录决策日志
-        print(f"🗳️ Agent {seat} 投票给 {decision['targetSeat']}, 原因: {decision.get('reason', 'N/A')}")
+        logger.debug(f"Agent {seat} 投票给 {decision.get('targetSeat', 'None')}, 原因: {decision.get('reason', 'N/A')}")
 
         return {
-            'voterSeat': decision['voterSeat'],
-            'targetSeat': decision['targetSeat'],
+            'voterSeat': decision.get('voterSeat', seat),
+            'targetSeat': decision.get('targetSeat'),
             'reason': decision.get('reason', '')
         }
     except Exception as e:
-        print(f"❌ Agent {seat} 投票决策失败: {str(e)}")
-        # 返回随机决策作为后备
-        target = random.choice(available_targets) if available_targets else None
-        return {
-            'voterSeat': seat,
-            'targetSeat': target,
-            'reason': '随机投票（后备）'
-        }
+        logger.error(f"Agent {seat} 投票决策失败: {str(e)}", exc_info=True)
+        # 重新抛出异常，让上层处理
+        raise
 

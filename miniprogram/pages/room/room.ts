@@ -9,6 +9,7 @@ import {
   getGameState,
   Role,
   startRound,
+  submitNightAction,
   submitSpeech,
   submitVote
 } from '../../services/gameApi'
@@ -116,6 +117,16 @@ Component({
 
     // 跟踪前一阶段，用于检测阶段切换
     _lastGamePhase: '' as string,
+
+    // 轮询执行标志，防止并发重复执行
+    _isPolling: false,
+
+    // 夜晚行动状态
+    nightPhaseTip: '',
+    waitingText: '',
+    isMyTurn: false,
+    selectedNightTarget: 0,
+    selectedWitchAction: '' as string,
   },
   lifetimes: {
     attached() {
@@ -225,10 +236,31 @@ Component({
     },
 
     async pollGameState() {
+      // 防止并发执行：如果上一次轮询还没完成，直接返回
+      if ((this as any)._isPolling) {
+        console.log('[pollGameState] 上一次轮询还在执行中，跳过本次')
+        return
+      }
+
+      (this as any)._isPolling = true
+
       try {
         // 获取完整游戏状态
         const gameData = await getGameState({ roomId: this.data.roomId })
         const { uiPhase, phaseText } = this.mapGamePhase(gameData.phase)
+
+        // 添加调试日志
+        if (gameData.phase === 'night_action') {
+          console.log('[pollGameState] night_action 阶段 gameData:', {
+            phase: gameData.phase,
+            currentRole: (gameData as any).currentRole,
+            actionRole: (gameData as any).actionRole,
+            nightTimeLeft: (gameData as any).nightTimeLeft,
+            alivePlayers: gameData.alivePlayers,
+            nightActionsCompleted: (gameData as any).nightActionsCompleted,
+            rolesBySeat: (gameData as any).rolesBySeat
+          })
+        }
 
         // 检查是否需要播报（播报是附加信息，不影响游戏状态）
         if ((gameData as any).announcement) {
@@ -322,6 +354,9 @@ Component({
         })
       } catch (e) {
         console.error('轮询失败:', e)
+      } finally {
+        // 无论成功或失败，都要重置轮询标志
+        (this as any)._isPolling = false
       }
     },
 
@@ -426,7 +461,7 @@ Component({
       console.log(`[handleDayDiscussion] 当前发言者: ${currentSpeaker}, 已处理:`, processedSpeakers)
 
       if (currentSpeaker !== 0 && !processedSpeakers.includes(currentSpeaker)) {
-        // 添加到已处理列表
+        // 先添加到已处理列表，防止并发重复执行
         const newProcessedSpeakers = [...processedSpeakers, currentSpeaker]
         console.log(`[handleDayDiscussion] 将 ${currentSpeaker} 号添加到已处理列表`)
         this.setData({ _processedSpeakers: newProcessedSpeakers })
@@ -463,6 +498,10 @@ Component({
               await advanceSpeaker({ roomId: this.data.roomId })
             } catch (e) {
               console.error('获取 Agent 发言失败:', e)
+              // 失败时从已处理列表中移除，下次轮询可以重试
+              const updatedProcessedSpeakers = this.data._processedSpeakers.filter(s => s !== currentSpeaker)
+              console.log(`[handleDayDiscussion] 将 ${currentSpeaker} 号从已处理列表移除，允许重试`)
+              this.setData({ _processedSpeakers: updatedProcessedSpeakers })
             }
           }
         }
@@ -492,47 +531,82 @@ Component({
     },
 
     async handleNightAction(gameData: any) {
-      const mySeat = this.data.mySeat
       const myRole = this.data.myRole
-      const currentRole = gameData.currentRole
+      const currentRole = gameData.currentRole as string || gameData.actionRole || ''
       const nightTimeLeft = gameData.nightTimeLeft || 0
+
+      console.log(`[handleNightAction] myRole=${myRole}, currentRole=${currentRole}, nightTimeLeft=${nightTimeLeft}`)
+
+      // 检查是否轮到我的角色
+      const isMyTurn = currentRole === myRole
+      this.setData({ isMyTurn })
 
       // 晚上行动阶段：Agent 由前端触发后端接口
       // 遍历所有玩家，找到当前需要行动的 Agent
       for (const player of this.data.players) {
         // 只处理存活的玩家
-        if (!this.data.alivePlayers.includes(player.seat)) continue
+        if (!this.data.alivePlayers.includes(player.seat)) {
+          const playerRole = this.getRoleBySeat(player.seat)
+          console.log(`[handleNightAction] 跳过 ${player.seat} (已死亡), 角色=${playerRole}`)
+          continue
+        }
 
         // 检查是否轮到该角色的行动
         // 从本地获取该玩家的角色信息
         const playerRole = this.getRoleBySeat(player.seat)
 
-        if (!playerRole || !['werewolf', 'seer', 'witch'].includes(playerRole)) continue
+        console.log(`[handleNightAction] 玩家 ${player.seat} 角色=${playerRole}, isMe=${player.isMe}`)
+
+        if (!playerRole || !['werewolf', 'seer', 'witch'].includes(playerRole)) {
+          console.log(`[handleNightAction] 跳过 ${player.seat} (角色不匹配: ${playerRole})`)
+          continue
+        }
 
         // 检查是否轮到这个角色行动
-        if (currentRole !== playerRole) continue
+        if (currentRole !== playerRole) {
+          console.log(`[handleNightAction] 跳过 ${player.seat} (当前不是该角色行动: ${playerRole} != ${currentRole})`)
+          continue
+        }
 
         // 检查是否是 Agent
         if (!player.isMe) {
           // 这是 Agent，前端触发后端接口
+          console.log(`[handleNightAction] 触发 Agent ${player.seat} (${playerRole}) 行动`)
           try {
+            // 获取 Agent 的行动决策
             const agentAction = await getAgentAction({
               roomId: this.data.roomId,
               seat: player.seat,
               role: playerRole as Role,
               availableTargets: gameData.alivePlayers || [],
             })
-            console.log(`Agent ${player.seat} (${playerRole}) 执行了 ${agentAction.actionType} 行动`, agentAction)
+            console.log(`Agent ${player.seat} (${playerRole}) 决策了 ${agentAction.actionType} 行动`, agentAction)
+
+          // 提交 Agent 的行动到后端
+          console.log(`[handleNightAction] 准备提交 Agent 行动:`, {
+            seat: player.seat,
+            role: playerRole,
+            actionType: agentAction.actionType,
+            targetSeat: agentAction.targetSeat || 0
+          })
+          await submitNightAction({
+              roomId: this.data.roomId,
+              playerSeat: player.seat,
+              role: playerRole as Role,
+              actionType: agentAction.actionType as 'kill' | 'check' | 'save' | 'poison',
+              targetSeat: agentAction.targetSeat || 0
+            })
+            console.log(`Agent ${player.seat} (${playerRole}) 的行动已提交`)
           } catch (e) {
-            console.error(`获取 Agent ${player.seat} 行动失败:`, e)
+            console.error(`Agent ${player.seat} 行动失败:`, e)
           }
-        } else if (player.seat === mySeat) {
-          // 这是人类玩家且轮到自己行动
-          if (currentRole === myRole) {
-            console.log(`轮到你了 (${myRole})，请选择行动`)
-          }
+        } else {
+          console.log(`[handleNightAction] ${player.seat} 是玩家，需要手动操作`)
         }
       }
+
+      // 更新提示文本
+      this.updateNightTipText(gameData)
 
       // 如果还有剩余时间，继续轮询让后端处理超时
       if (nightTimeLeft > 0) {
@@ -541,10 +615,107 @@ Component({
       }
     },
 
+    updateNightTipText(gameData: any) {
+      const myRole = this.data.myRole
+      const currentRole = gameData.currentRole as string || gameData.actionRole || ''
+
+      // 根据当前角色和是否轮到我，更新提示文本
+      if (currentRole === myRole) {
+        const roleMap: Record<string, string> = {
+          'werewolf': '请选择击杀目标',
+          'witch': '请选择是否使用药水',
+          'seer': '请选择查验目标'
+        }
+        this.setData({
+          nightPhaseTip: roleMap[myRole as string] || '',
+          waitingText: ''
+        })
+      } else {
+        const roleName: Record<string, string> = { 'werewolf': '狼人', 'witch': '女巫', 'seer': '预言家' }
+        this.setData({
+          nightPhaseTip: '请等待其他角色行动',
+          waitingText: `${roleName[currentRole as string] || currentRole}正在行动中...`
+        })
+      }
+    },
+
     // 辅助方法：根据座位号获取角色
     getRoleBySeat(seat: number): string | null {
       if (!this.data.rolesBySeat) return null
       return this.data.rolesBySeat[seat] || null
+    },
+
+    // 夜晚操作相关方法
+    selectNightTarget(e: any) {
+      const target = e.currentTarget.dataset.target as number
+      this.setData({ selectedNightTarget: target })
+    },
+
+    selectWitchAction(e: any) {
+      const action = e.currentTarget.dataset.action as string
+      this.setData({ selectedWitchAction: action })
+    },
+
+    getWitchActionText(): string {
+      switch (this.data.selectedWitchAction) {
+        case 'save':
+          return '使用解药'
+        case 'poison':
+          return '使用毒药'
+        default:
+          return '选择目标'
+      }
+    },
+
+    async submitNightAction() {
+      const mySeat = this.data.mySeat
+      const myRole = this.data.myRole
+
+      if (!this.data.isMyTurn) {
+        wx.showToast({ title: '还没轮到你', icon: 'none' })
+        return
+      }
+
+      try {
+        if (myRole === 'werewolf' || myRole === 'seer') {
+          const target = this.data.selectedNightTarget
+          if (!target) {
+            wx.showToast({ title: '请选择目标', icon: 'none' })
+            return
+          }
+
+          await submitNightAction({
+            roomId: this.data.roomId,
+            playerSeat: mySeat,
+            role: myRole as Role,
+            actionType: myRole === 'werewolf' ? 'kill' : 'check',
+            targetSeat: target
+          })
+
+          this.setData({ selectedNightTarget: 0 })
+        } else if (myRole === 'witch') {
+          const action = this.data.selectedWitchAction
+          if (!action || action === 'none') {
+            wx.showToast({ title: '请选择药水', icon: 'none' })
+            return
+          }
+
+          const targetSeat = action === 'save' ? this.data.selectedNightTarget : 0
+
+          await submitNightAction({
+            roomId: this.data.roomId,
+            playerSeat: mySeat,
+            role: myRole as Role,
+            actionType: action as 'kill' | 'check' | 'save' | 'poison',
+            targetSeat: targetSeat
+          })
+
+          this.setData({ selectedWitchAction: '', selectedNightTarget: 0 })
+        }
+      } catch (e) {
+        console.error('提交夜晚行动失败:', e)
+        wx.showToast({ title: '提交失败', icon: 'none' })
+      }
     },
 
     async handleResult(gameData: any) {

@@ -2,13 +2,15 @@
 经典狼人杀状态机
 实现经典狼人杀游戏的完整状态机逻辑
 """
+import logging
 import random
-from datetime import datetime
 from typing import Dict, Tuple, Any, Optional
 
 from .base_state_machine import BaseStateMachine
 from .state_context import GameStateContext
 from .state_enums import Role, GameResult, KilledBy
+
+logger = logging.getLogger('state_machine')
 
 
 class ClassicWerewolfStateMachine(BaseStateMachine):
@@ -155,6 +157,9 @@ class ClassicWerewolfStateMachine(BaseStateMachine):
             'saved_history': []
         }
 
+        # 初始化夜晚角色开始时间跟踪
+        self.context.night_role_start_times = {}
+
     def _on_day_discussion_start(self):
         """白天讨论开始时的处理"""
         self._init_speaking_order()
@@ -168,13 +173,24 @@ class ClassicWerewolfStateMachine(BaseStateMachine):
         self._execute_voting()
 
         # 初始化晚上行动状态
-        self.context.night_current_role = 'seer'  # 预言家先行动
+        self.context.night_current_role = 'werewolf'  # 狼人先行动
+        from datetime import datetime
         self.context.night_action_start_time = datetime.now().timestamp()
         self.context.night_actions_completed = []
         self.context.seer_checked = None
         self.context.werewolf_killed = None
         self.context.witch_saved = None
         self.context.witch_poisoned = None
+
+        # 初始化每个角色的开始时间
+        self.context.night_role_start_times = {}
+        self.context.night_role_start_times['werewolf'] = datetime.now().timestamp()
+
+        # 播报狼人开始行动
+        from datetime import datetime
+        self.context.extensions['announcement'] = '🐺 天黑请闭眼，狼人请睁眼选择目标'
+        self.context.extensions['announcement_time'] = datetime.now().timestamp()
+        self.context.extensions['action_role'] = 'werewolf'
 
     def _on_new_day(self):
         """新一天开始时的处理"""
@@ -251,10 +267,38 @@ class ClassicWerewolfStateMachine(BaseStateMachine):
         参数:
             payload: {'playerSeat': 玩家座位, 'role': 角色, 'actionType': 动作类型, 'targetSeat': 目标座位}
         """
+        # 检查当前角色是否超时（超过1分钟自动跳过）
+        from datetime import datetime
+        current_role = self.context.night_current_role
+        logger.debug(f"[_handle_night_action] timeout check - current_role: {current_role}, night_role_start_times: {self.context.night_role_start_times}")
+        if current_role and current_role in self.context.night_role_start_times:
+            elapsed_time = datetime.now().timestamp() - self.context.night_role_start_times[current_role]
+            logger.debug(f"[_handle_night_action] elapsed_time for {current_role}: {elapsed_time:.1f}s")
+            if elapsed_time > 60:
+                logger.info(f"[_handle_night_action] Role {current_role} timeout ({elapsed_time:.1f}s), skipping to next role")
+                # 将当前角色标记为已完成
+                if current_role not in self.context.night_actions_completed:
+                    self.context.night_actions_completed.append(current_role)
+                # 推进到下一个角色
+                next_role = self._get_next_night_role(current_role)
+                if next_role:
+                    self.context.night_current_role = next_role
+                    self._announce_night_role_start(next_role)
+                    self.context.night_role_start_times[next_role] = datetime.now().timestamp()
+                    logger.debug(f"[_handle_night_action] Advanced to next role: {next_role}")
+                else:
+                    logger.debug(f"[_handle_night_action] All roles completed, transitioning to day_discussion")
+                    self.transition_to('day_discussion')
+                # 超时情况下，拒绝当前动作
+                return False, f"Role {current_role} timeout, action not accepted", None
+
+        logger.debug(f"[_handle_night_action] payload: {payload}")
         player_seat = payload.get('playerSeat')
         role = payload.get('role')
         action_type = payload.get('actionType')
         target_seat = payload.get('targetSeat')
+
+        logger.debug(f"[_handle_night_action] parsed values - player_seat: {player_seat}, role: {role}, action_type: {action_type}, target_seat: {target_seat}")
 
         player = self.context.players.get(player_seat)
         if not player or not player.alive:
@@ -264,19 +308,40 @@ class ClassicWerewolfStateMachine(BaseStateMachine):
             return False, "Role mismatch", None
 
         # 检查是否是当前行动的角色
-        current_role = self.context.night_current_role
         if role != current_role:
+            logger.warning(f"[_handle_night_action] Not your turn. Current: {current_role}, Your: {role}")
             return False, f"Not your turn. Current: {current_role}, Your: {role}", None
 
         # 根据角色和动作类型处理
         announcement_text = None
 
         if action_type == 'kill' and role == 'werewolf':
-            self.context.werewolf_killed = target_seat
-            if target_seat:
-                target_role = self.context.players[target_seat].role.value
-                announcement_text = f"🐺 狼人 ({player_seat}号) 选择击杀了 {target_seat}号 ({target_role})"
+            # 记录狼人的击杀选择，不立即生效
+            # 等所有狼人完成后再统一执行
+            # 验证目标座位是否有效
+            if target_seat is not None and target_seat not in self.context.players:
+                logger.warning(f"[_handle_night_action] Invalid target seat: {target_seat}")
+                return False, "Invalid target seat", None
+            target_role = self.context.players[target_seat].role.value if target_seat else None
+            announcement_text = f"🐺 狼人 ({player_seat}号) 选择击杀了 {target_seat}号 ({target_role})"
+
+            # 记录狼人选择到上下文
+            if not self.context.extensions.get('werewolf_choices'):
+                self.context.extensions['werewolf_choices'] = {}
+            self.context.extensions['werewolf_choices'][player_seat] = target_seat
+
+            # 检查是否所有狼人都选择了目标
+            werewolf_choices = self.context.extensions.get('werewolf_choices', {})
+            werewolf_players = [p for p in self.context.players.values() if p.alive and p.role == Role.WEREWOLF]
+
+            if len(werewolf_choices) >= len(werewolf_players):
+                # 所有狼人都选择了，执行最终击杀
+                self._execute_werewolf_kill()
         elif action_type == 'check' and role == 'seer':
+            # 验证目标座位是否有效
+            if target_seat is not None and target_seat not in self.context.players:
+                logger.warning(f"[_handle_night_action] Invalid target seat: {target_seat}")
+                return False, "Invalid target seat", None
             self.context.seer_checked = target_seat
             if target_seat:
                 target_role = self.context.players[target_seat].role.value
@@ -291,6 +356,10 @@ class ClassicWerewolfStateMachine(BaseStateMachine):
             # 检查女巫是否还有药
             if self.context.witch_saved is not None:
                 return False, "Witch already used save", None
+            # 验证目标座位是否有效（只有解药救人时才需要验证）
+            if target_seat is not None and target_seat not in self.context.players:
+                logger.warning(f"[_handle_night_action] Invalid target seat: {target_seat}")
+                return False, "Invalid target seat", None
             self.context.witch_saved = target_seat
             if target_seat:
                 # 更新女巫上下文（记录救过的玩家）
@@ -306,6 +375,10 @@ class ClassicWerewolfStateMachine(BaseStateMachine):
             # 检查女巫是否还有毒药
             if self.context.witch_poisoned is not None:
                 return False, "Witch already used poison", None
+            # 验证目标座位是否有效
+            if target_seat is not None and target_seat not in self.context.players:
+                logger.warning(f"[_handle_night_action] Invalid target seat: {target_seat}")
+                return False, "Invalid target seat", None
             self.context.witch_poisoned = target_seat
             if target_seat:
                 # 更新女巫上下文（使用毒药）
@@ -318,20 +391,28 @@ class ClassicWerewolfStateMachine(BaseStateMachine):
                     self.context.witch_context['has_poison_potion'] = False
                 announcement_text = f"☠️ 女巫 ({player_seat}号) 选择不使用毒药"
         else:
+            logger.error(f"[_handle_night_action] Invalid action type: {action_type}, role: {role}")
             return False, "Invalid action type", None
 
         # 记录角色已完成行动
         if role not in self.context.night_actions_completed:
             self.context.night_actions_completed.append(role)
+            logger.debug(f"[_handle_night_action] Added {role} to night_actions_completed: {self.context.night_actions_completed}")
 
         # 角色行动完成，推进到下一个角色或结束晚上阶段
         next_role = self._get_next_night_role(role)
+        logger.debug(f"[_handle_night_action] next_role: {next_role}")
         if next_role:
             self.context.night_current_role = next_role
-            # 播报给当前角色
-            self._announce_night_role_action(next_role, announcement_text)
+            # 播报下一个角色开始行动
+            self._announce_night_role_start(next_role)
+            # 更新下一个角色的开始时间
+            from datetime import datetime
+            self.context.night_role_start_times[next_role] = datetime.now().timestamp()
+            logger.debug(f"[_handle_night_action] Advanced to next role: {next_role}")
         else:
             # 所有人都行动完成，转换到新一天
+            logger.debug(f"[_handle_night_action] All roles completed, transitioning to day_discussion")
             self.transition_to('day_discussion')
 
         return True, "Night action submitted successfully", {
@@ -342,11 +423,26 @@ class ClassicWerewolfStateMachine(BaseStateMachine):
 
     def _get_next_night_role(self, current_role: str) -> Optional[str]:
         """获取下一个需要行动的角色"""
-        role_order = ['seer', 'werewolf', 'witch']
+        role_order = ['werewolf', 'witch', 'seer']  # 狼人 -> 女巫 -> 预言家
         for role in role_order:
             if role not in self.context.night_actions_completed:
                 return role
         return None
+
+    def _announce_night_role_start(self, role: str):
+        """播报角色开始行动"""
+        announcement_map = {
+            'werewolf': '🐺 狼人请睁眼选择击杀目标',
+            'witch': '🧙 女巫请睁眼选择是否使用药水',
+            'seer': '🔮 预言家请睁眼选择查验目标'
+        }
+        announcement_text = announcement_map.get(role, '')
+
+        # 设置播报内容到扩展字段
+        from datetime import datetime
+        self.context.extensions['announcement'] = announcement_text
+        self.context.extensions['announcement_time'] = datetime.now().timestamp()
+        self.context.extensions['action_role'] = role
 
     def _announce_night_role_action(self, role: str, announcement_text: Optional[str]):
         """播报当前角色的行动任务"""
@@ -358,6 +454,59 @@ class ClassicWerewolfStateMachine(BaseStateMachine):
         self.context.extensions['announcement'] = announcement_text
         self.context.extensions['announcement_time'] = datetime.now().timestamp()
         self.context.extensions['action_role'] = role  # 记录播报给谁
+
+    def _execute_werewolf_kill(self):
+        """执行狼人最终击杀逻辑（所有狼人都选择后调用）"""
+        werewolf_choices = self.context.extensions.get('werewolf_choices', {})
+        if not werewolf_choices:
+            return
+
+        # 统计票数，选择最多票的目标
+        vote_counts = {}
+        for seat, target in werewolf_choices.items():
+            if target:
+                vote_counts[target] = vote_counts.get(target, 0) + 1
+
+        if not vote_counts:
+            return  # 没有狼人选择，不执行击杀
+
+        # 找出票数最多的目标
+        max_votes = max(vote_counts.values())
+        voted_outs = [seat for seat, count in vote_counts.items() if count == max_votes]
+
+        # 平票处理：随机选择
+        killed = random.choice(voted_outs) if len(voted_outs) > 1 else voted_outs[0]
+
+        # 执行击杀
+        self.context.werewolf_killed = killed
+
+        if killed and killed in self.context.players:
+            player = self.context.players[killed]
+            player.alive = False
+
+            # 记录死亡信息
+            self.context.last_dead_player = {
+                'seat': killed,
+                'role': player.role.value,
+                'killed_by': KilledBy.WEREWOLF.value
+            }
+
+            self._add_message('player_death', {
+                'seat': killed,
+                'role': player.role.value,
+                'killed_by': KilledBy.WEREWOLF.value,
+                'round': self.context.round
+            })
+
+            # 播报击杀结果
+            announcement_lines = [f'🐺 狼人投票击杀了 {killed}号玩家']
+            announcement_text = '\n'.join(announcement_lines)
+            from datetime import datetime
+            self.context.extensions['announcement'] = announcement_text
+            self.context.extensions['announcement_time'] = datetime.now().timestamp()
+
+        # 清空狼人选择，为下一轮做准备
+        self.context.extensions['werewolf_choices'] = {}
 
     def _handle_advance_speaker(self, payload: Dict) -> Tuple[bool, str, Any]:
         """
@@ -507,6 +656,10 @@ class ClassicWerewolfStateMachine(BaseStateMachine):
         self.context.extensions['announcement'] = announcement_text
         self.context.extensions['announcement_time'] = datetime.now().timestamp()
 
+        # 投票完成后转移到晚上行动阶段
+        if not self._check_game_over():
+            self.transition_to('night_action')
+
     def _execute_voting(self):
         """执行白天投票逻辑"""
         if not self.context.voting_result:
@@ -622,6 +775,7 @@ class ClassicWerewolfStateMachine(BaseStateMachine):
     def _get_extended_state(self) -> Dict[str, Any]:
         """获取经典狼人杀的扩展状态"""
         from datetime import datetime
+        logger.debug(f"[classic_werewolf] _get_extended_state called, phase: {self.context.phase}")
 
         extended_state = {}
 
@@ -664,8 +818,15 @@ class ClassicWerewolfStateMachine(BaseStateMachine):
 
         # 如果在晚上行动阶段，返回晚上行动相关信息
         elif self.context.phase == 'night_action':
-            # 计算当前角色行动时间
-            elapsed_time = datetime.now().timestamp() - self.context.night_action_start_time
+            # 计算当前角色行动时间（使用该角色的独立开始时间）
+            from datetime import datetime
+            current_role = self.context.night_current_role
+            if current_role and current_role in self.context.night_role_start_times:
+                elapsed_time = datetime.now().timestamp() - self.context.night_role_start_times[current_role]
+            else:
+                elapsed_time = 0
+                time_left = 0
+
             time_left = max(0, 60 - int(elapsed_time))  # 60秒行动时间
 
             # 如果超时，自动推进到下一个角色
@@ -674,7 +835,7 @@ class ClassicWerewolfStateMachine(BaseStateMachine):
                 next_role = self._get_next_night_role(current_role)
                 if next_role:
                     self.context.night_current_role = next_role
-                    self.context.night_action_start_time = datetime.now().timestamp()
+                    self.context.night_role_start_times[next_role] = datetime.now().timestamp()
                 else:
                     # 所有人都行动完成，转换到新一天
                     self.transition_to('day_discussion')
@@ -684,6 +845,8 @@ class ClassicWerewolfStateMachine(BaseStateMachine):
                 'nightTimeLeft': time_left,
                 'nightActionsCompleted': self.context.night_actions_completed
             })
+            logger.debug(f"[classic_werewolf] night_action extended_state: {extended_state}")
 
+        logger.debug(f"[classic_werewolf] returning extended_state: {extended_state}")
         return extended_state
 

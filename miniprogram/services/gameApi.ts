@@ -96,11 +96,11 @@ export type SubmitVoteResponse = {
 
 // 晚上行动（狼人/预言家/女巫）
 export type SubmitNightActionRequest = {
-  roomId: string
-  playerSeat: number
-  role: Role
-  actionType: 'kill' | 'check' | 'save'
-  targetSeat?: number
+roomId: string
+playerSeat: number
+role: Role
+actionType: 'kill' | 'check' | 'save' | 'poison'
+targetSeat?: number
 }
 
 export type SubmitNightActionResponse = {

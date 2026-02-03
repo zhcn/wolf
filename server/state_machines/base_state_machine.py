@@ -2,11 +2,14 @@
 状态机基类
 定义所有状态机的通用接口和核心功能
 """
+import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Dict, Tuple, Optional, Any
 
 from .state_context import GameStateContext
+
+logger = logging.getLogger('state_machine')
 
 
 class BaseStateMachine(ABC):
@@ -181,6 +184,7 @@ class BaseStateMachine(ABC):
 
         # 子类扩展字段
         extended_state = self._get_extended_state()
+        logger.debug(f"[base_state_machine] extended_state: {extended_state}, phase: {self.context.phase}")
 
         return {**base_state, **extended_state}
 

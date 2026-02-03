@@ -52,6 +52,12 @@ api_logger.setLevel(logging.DEBUG)
 api_logger.addHandler(file_handler)
 api_logger.addHandler(console_handler)
 
+# 创建状态机日志记录器
+state_machine_logger = logging.getLogger('state_machine')
+state_machine_logger.setLevel(logging.DEBUG)
+state_machine_logger.addHandler(file_handler)
+state_machine_logger.addHandler(console_handler)
+
 # ============== 请求/响应日志中间件 ==============
 
 @app.before_request

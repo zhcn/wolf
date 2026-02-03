@@ -298,13 +298,15 @@ page {
 /* 发言记录 */
 .speeches-scroll {
   flex: 1;
-  overflow-y: auto;
+  min-height: 0;
+  /* 移除 overflow-y，让 scroll-view 自己处理滚动 */
 }
 
 .speeches {
   display: flex;
   flex-direction: column-reverse;
   gap: 12rpx;
+  min-height: 100%;
 }
 
 .speech-item {
@@ -439,6 +441,8 @@ page {
   flex-direction: column;
   flex: 1;
   gap: 12rpx;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .discussing-header {
@@ -447,12 +451,14 @@ page {
   color: #333;
   padding-bottom: 8rpx;
   border-bottom: 2rpx solid #f0f0f0;
+  flex-shrink: 0;
 }
 
 .speech-input-area {
   display: flex;
   flex-direction: column;
   gap: 10rpx;
+  flex-shrink: 0;
 }
 
 .submit-speech-btn {
@@ -538,36 +544,164 @@ page {
   gap: 16rpx;
   justify-content: center;
   align-items: center;
+  padding: 16rpx;
 }
 
 .night-header {
   font-size: 32rpx;
   font-weight: 600;
   color: #333;
+  margin-bottom: 12rpx;
 }
 
 .night-tip {
-  font-size: 22rpx;
+  font-size: 24rpx;
   color: #666;
+  margin-bottom: 16rpx;
 }
 
-.night-action-info {
+/* 等待其他角色行动 */
+.night-waiting {
   display: flex;
   flex-direction: column;
-  gap: 12rpx;
-  width: 100%;
-  background: #fafafa;
-  border-radius: 10rpx;
-  padding: 20rpx;
-  box-sizing: border-box;
-  text-align: center;
+  align-items: center;
+  justify-content: center;
+  padding: 40rpx 20rpx;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
+  border-radius: 12rpx;
+  border: 2rpx solid rgba(102, 126, 234, 0.2);
   flex: 1;
 }
 
-.night-action-info text {
+.waiting-role {
+  font-size: 60rpx;
+  line-height: 1;
+  margin-bottom: 12rpx;
+}
+
+.waiting-text {
   font-size: 24rpx;
   color: #333;
-  line-height: 1.5;
+}
+
+/* 行动面板 */
+.night-action {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+  padding: 20rpx;
+  background: white;
+  border-radius: 12rpx;
+  box-shadow: 0 4rpx 12rpx rgba(0, 0, 0, 0.08);
+}
+
+.action-title {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: #333;
+  text-align: center;
+  margin-bottom: 16rpx;
+}
+
+/* 目标选择 */
+.action-targets {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12rpx;
+  margin-bottom: 16rpx;
+}
+
+.target-item {
+  background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
+  border: 2rpx solid #667eea;
+  border-radius: 10rpx;
+  padding: 16rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.target-item:active {
+  background: linear-gradient(135deg, #667eea30 0%, #764ba230 100%);
+  box-shadow: 0 4rpx 12rpx rgba(102, 126, 234, 0.3);
+}
+
+.target-item.selected {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  box-shadow: 0 0 16rpx rgba(102, 126, 234, 0.4);
+  transform: scale(1.05);
+}
+
+.target-seat {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: #667eea;
+}
+
+/* 女巫选项 */
+.witch-options {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16rpx;
+  margin-bottom: 20rpx;
+}
+
+.option-btn {
+  background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
+  border: 2rpx solid #667eea;
+  border-radius: 10rpx;
+  padding: 20rpx 12rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8rpx;
+  transition: all 0.3s ease;
+}
+
+.option-btn:active {
+  background: linear-gradient(135deg, #667eea30 0%, #764ba230 100%);
+  box-shadow: 0 4rpx 12rpx rgba(102, 126, 234, 0.3);
+}
+
+.option-btn.selected {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  box-shadow: 0 0 16rpx rgba(102, 126, 234, 0.4);
+  transform: scale(1.05);
+}
+
+.option-icon {
+  font-size: 32rpx;
+  line-height: 1;
+}
+
+.option-text {
+  font-size: 20rpx;
+  color: #333;
+}
+
+/* 行动按钮 */
+.action-btn {
+  height: 60rpx;
+  font-size: 22rpx;
+  border-radius: 8rpx;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font-weight: 600;
+}
+
+.action-btn:active {
+  opacity: 0.8;
+}
+
+.action-btn[disabled] {
+  background: #ccc;
+  color: #999;
 }
 
 /* 结果展示 */
