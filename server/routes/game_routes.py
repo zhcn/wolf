@@ -7,6 +7,13 @@ import logging
 from flask import Blueprint, request, jsonify
 from game_engine import get_or_create_game, get_game
 
+# 导入调试配置
+try:
+    from debug_config import set_player_role, DEBUG_MODE
+    DEBUG_AVAILABLE = True
+except ImportError:
+    DEBUG_AVAILABLE = False
+
 bp = Blueprint('game', __name__, url_prefix='/api/rooms')
 
 # 获取日志记录器
@@ -491,4 +498,47 @@ def health_check(room_id):
         }, "Health check passed")
     except Exception as e:
         return error_response(500, f"Health check failed: {str(e)}")
+
+
+@bp.route('/debug/set-player-role', methods=['POST'])
+def set_player_role_api():
+    """
+    设置玩家角色（调试接口）
+    POST /rooms/debug/set-player-role
+
+    请求体:
+        {
+            "roomId": "classic",
+            "userSeat": 1,
+            "role": "werewolf"
+        }
+
+    注意：需要后端 DEBUG_MODE = True
+    """
+    if not DEBUG_AVAILABLE or not DEBUG_MODE:
+        return error_response(403, "Debug mode is not enabled")
+
+    try:
+        data = request.get_json()
+        room_id = data.get('roomId')
+        user_seat = data.get('userSeat')
+        role = data.get('role')
+
+        if not room_id or not user_seat or not role:
+            return error_response(400, "Missing required fields: roomId, userSeat, role")
+
+        # 设置玩家角色
+        set_player_role(room_id, user_seat, role)
+
+        logger.info(f"🎯 [debug] 设置玩家角色: 房间={room_id}, 座位={user_seat}, 角色={role}")
+
+        return success_response({
+            'roomId': room_id,
+            'userSeat': user_seat,
+            'role': role
+        }, "Player role set successfully")
+
+    except Exception as e:
+        logger.error(f"❌ [debug] 设置玩家角色失败: {str(e)}", exc_info=True)
+        return error_response(500, f"Error setting player role: {str(e)}")
 

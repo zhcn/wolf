@@ -23,7 +23,15 @@
     <!-- 左侧玩家 -->
     <view class="players-side left-side">
       <view class="player-item {{item.isMe ? 'me' : ''}} {{item.seat === currentSpeaker ? 'speaking' : ''}}" wx:for="{{leftPlayers}}" wx:key="seat">
-        <image class="player-avatar" src="{{item.avatarUrl}}" mode="cover"></image>
+        <view class="player-avatar-wrapper">
+          <image class="player-avatar" src="{{item.avatarUrl}}" mode="cover"></image>
+          <!-- 角色标签（显示在头像左下角） -->
+          <block wx:if="{{playerRolesBySeat[item.seat]}}">
+            <view class="role-badge" style="background-color: {{playerRolesBySeat[item.seat].color}}">
+              {{playerRolesBySeat[item.seat].label}}
+            </view>
+          </block>
+        </view>
         <view class="player-info">
           <view class="player-name">{{item.nickName}}</view>
           <view class="player-seat">{{item.seat}}号</view>
@@ -200,7 +208,15 @@
           <view class="player-name">{{item.nickName}}</view>
           <view class="player-seat">{{item.seat}}号</view>
         </view>
-        <image class="player-avatar" src="{{item.avatarUrl}}" mode="cover"></image>
+        <view class="player-avatar-wrapper">
+          <image class="player-avatar" src="{{item.avatarUrl}}" mode="cover"></image>
+          <!-- 角色标签（显示在头像左下角） -->
+          <block wx:if="{{playerRolesBySeat[item.seat]}}">
+            <view class="role-badge" style="background-color: {{playerRolesBySeat[item.seat].color}}">
+              {{playerRolesBySeat[item.seat].label}}
+            </view>
+          </block>
+        </view>
       </view>
     </view>
   </view>

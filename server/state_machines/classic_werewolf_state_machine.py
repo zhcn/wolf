@@ -10,6 +10,13 @@ from .base_state_machine import BaseStateMachine
 from .state_context import GameStateContext
 from .state_enums import Role, GameResult, KilledBy
 
+# 导入调试配置
+try:
+    from debug_config import get_player_role
+    DEBUG_AVAILABLE = True
+except ImportError:
+    DEBUG_AVAILABLE = False
+
 logger = logging.getLogger('state_machine')
 
 
@@ -74,13 +81,54 @@ class ClassicWerewolfStateMachine(BaseStateMachine):
         else:
             roles = self._get_custom_roles(self.seat_count)
 
-        # 随机洗牌
+        # 检查是否有固定角色配置（调试模式）
+        fixed_roles: Dict[int, Role] = {}
+        if DEBUG_AVAILABLE:
+            for seat in range(1, self.seat_count + 1):
+                player_role = get_player_role(self.room_id, seat)
+                if player_role:
+                    try:
+                        # 将字符串转换为 Role 枚举
+                        fixed_role = Role[player_role.upper()]
+                        fixed_roles[seat] = fixed_role
+                        logger.info(f"🎯 [assign_roles] 固定座位 {seat} 的角色为: {player_role}")
+                    except KeyError:
+                        logger.warning(f"⚠️ [assign_roles] 无效的角色名: {player_role}")
+
+        # 统计固定角色的类型和数量
+        fixed_role_counts = {}
+        for role in fixed_roles.values():
+            fixed_role_counts[role] = fixed_role_counts.get(role, 0) + 1
+
+        # 从角色池中移除固定角色（按数量）
+        if fixed_roles:
+            remaining_roles = []
+            for role in roles:
+                if role in fixed_role_counts and fixed_role_counts[role] > 0:
+                    fixed_role_counts[role] -= 1
+                else:
+                    remaining_roles.append(role)
+            roles = remaining_roles
+            logger.info(f"🎯 [assign_roles] 剩余角色池: {[r.value for r in roles]}")
+
+        # 随机洗牌剩余角色
         random.shuffle(roles)
 
         # 为每个玩家分配角色
-        for seat, role in enumerate(roles, start=1):
+        role_index = 0
+        for seat in range(1, self.seat_count + 1):
             if seat in self.context.players:
-                self.context.players[seat].role = role
+                if seat in fixed_roles:
+                    # 使用固定角色
+                    self.context.players[seat].role = fixed_roles[seat]
+                else:
+                    # 使用随机分配的角色
+                    if role_index >= len(roles):
+                        logger.error(f"❌ [assign_roles] 角色池不足！无法为座位 {seat} 分配角色")
+                        raise ValueError("角色池不足，无法为所有玩家分配角色")
+
+                    self.context.players[seat].role = roles[role_index]
+                    role_index += 1
 
         # 更新游戏状态
         self.context.round = 1

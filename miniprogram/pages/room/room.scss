@@ -101,6 +101,29 @@ page {
 .right-side {
 }
 
+/* 角色标签 - 显示在玩家头像左下角 */
+.role-badge {
+  position: absolute;
+  bottom: -4rpx;
+  left: -4rpx;
+  padding: 4rpx 12rpx;
+  font-size: 18rpx;
+  color: white;
+  border-radius: 8rpx;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.15);
+  z-index: 2;
+  min-width: 60rpx;
+  text-align: center;
+}
+
+/* 调试标签 */
+.role-badge.debug-badge {
+  background-color: #ff6b6b;
+  min-width: 80rpx;
+}
+
 .player-item {
   display: flex;
   flex-direction: column;
@@ -134,6 +157,11 @@ page {
   }
 }
 
+.player-avatar-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
 .player-avatar {
   width: 80rpx;
   height: 80rpx;
@@ -141,6 +169,8 @@ page {
   overflow: hidden;
   border: 2rpx solid #ddd;
   flex-shrink: 0;
+  position: relative;
+  z-index: 1;
 }
 
 .player-item.me .player-avatar {

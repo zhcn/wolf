@@ -163,6 +163,12 @@ Component({
       const leftPlayers = players.slice(0, halfCount)
       const rightPlayers = players.slice(halfCount)
 
+      // 计算每个座位的角色标签信息
+      const playerRolesBySeat: Record<number, { role: string, label: string, color: string } | null> = {}
+      players.forEach(player => {
+        playerRolesBySeat[player.seat] = null // 默认为null，后续计算
+      })
+
       this.setData({
         roomId,
         mySeat,
@@ -173,6 +179,7 @@ Component({
         phaseText: '等待开始',
         myRole: '',
         speechDraft: '',
+        playerRolesBySeat,
       })
     },
     detached() {
@@ -195,6 +202,23 @@ Component({
         const mySeat = this.data.mySeat
         const myRole = roleData.rolesBySeat[mySeat]
 
+        // 使用 getKnownRoleInfo 计算玩家角色标签信息
+        // 注意：需要先临时设置 rolesBySeat，以便 getKnownRoleInfo 能够访问
+        const oldRolesBySeat = this.data.rolesBySeat
+        this.data.rolesBySeat = roleData.rolesBySeat // 临时设置，不触发 setData
+        const oldMyRole = this.data.myRole
+        this.data.myRole = myRole // 临时设置，不触发 setData
+
+        const playerRolesBySeat: Record<number, { role: string, label: string, color: string } | null> = {}
+        this.data.players.forEach((player: PlayerView) => {
+          playerRolesBySeat[player.seat] = this.getKnownRoleInfo(player.seat)
+        })
+
+        // 恢复旧值
+        this.data.rolesBySeat = oldRolesBySeat
+        this.data.myRole = oldMyRole
+
+        // 设置所有数据
         this.setData({
           phase: 'role_assigned',
           phaseText: '角色已分配，准备开始',
@@ -203,6 +227,7 @@ Component({
           rolesBySeat: roleData.rolesBySeat,
           alivePlayers: Array.from({ length: this.data.seatCount }, (_, i) => i + 1),
           deadPlayers: [],
+          playerRolesBySeat,
         })
 
         // 启动轮询
@@ -336,7 +361,7 @@ Component({
         }
 
         // 同步后端状态到UI
-        this.setData({
+        const updateData: any = {
           phase: uiPhase,
           phaseText,
           round: gameData.round,
@@ -351,7 +376,38 @@ Component({
           votingVotedCount: gameData.votingVotedCount || 0,
           votingResult: gameData.votingResult || null,
           playerVotes: gameData.playerVotes || {},
-        })
+        }
+
+// 如果后端返回了 rolesBySeat，同步更新
+// 注意：只在第一次分配角色时设置，后续轮询不覆盖
+if ((gameData as any).rolesBySeat && !this.data.rolesBySeat) {
+console.log(`[pollGameState] 初始化 rolesBySeat`, (gameData as any).rolesBySeat)
+updateData.rolesBySeat = (gameData as any).rolesBySeat
+}
+
+// 计算 playerRolesBySeat：根据当前角色视角计算每个座位应该显示的角色信息
+// 注意：使用 updateData.rolesBySeat || this.data.rolesBySeat，因为 updateData 可能包含新的 rolesBySeat
+const rolesBySeat = updateData.rolesBySeat || this.data.rolesBySeat
+if (rolesBySeat && this.data.myRole) {
+const playerRolesBySeat: Record<number, { role: string, label: string, color: string } | null> = {}
+const seatCount = this.data.players.length
+
+// 临时设置 rolesBySeat，以便 getKnownRoleInfo 能够访问
+const oldRolesBySeat = this.data.rolesBySeat
+this.data.rolesBySeat = rolesBySeat
+
+for (let seat = 1; seat <= seatCount; seat++) {
+playerRolesBySeat[seat] = this.getKnownRoleInfo(seat)
+}
+
+// 恢复旧值
+this.data.rolesBySeat = oldRolesBySeat
+
+updateData.playerRolesBySeat = playerRolesBySeat
+console.log(`[pollGameState] 更新 playerRolesBySeat`, playerRolesBySeat)
+}
+
+this.setData(updateData)
       } catch (e) {
         console.error('轮询失败:', e)
       } finally {
@@ -643,6 +699,77 @@ Component({
     getRoleBySeat(seat: number): string | null {
       if (!this.data.rolesBySeat) return null
       return this.data.rolesBySeat[seat] || null
+    },
+
+    // 辅助方法：获取当前视角知道的角色信息
+    getKnownRoleInfo(seat: number): { role: string, label: string, color: string } | null {
+      const myRole = this.data.myRole
+      const targetRole = this.getRoleBySeat(seat)
+
+      console.log(`[getKnownRoleInfo] seat=${seat}, myRole=${myRole}, targetRole=${targetRole}`)
+      console.log(`[getKnownRoleInfo] rolesBySeat:`, this.data.rolesBySeat)
+      console.log(`[getKnownRoleInfo] mySeat:`, this.data.mySeat)
+
+      // 如果自己的角色还没分配，或者目标角色不存在，不显示标签
+      if (!myRole || !targetRole) {
+        console.log(`[getKnownRoleInfo] 返回 null: myRole=${myRole}, targetRole=${targetRole}`)
+        return null
+      }
+
+      // 未知角色信息
+      const unknownInfo = { role: 'unknown', label: '未知', color: '#999999' }
+
+      let result: { role: string, label: string, color: string }
+      switch (myRole) {
+        case 'werewolf':
+          // 狼人可以看到所有狼人队友
+          if (targetRole === 'werewolf') {
+            result = { role: 'werewolf', label: '狼人', color: '#FF4D4F' }
+          } else {
+            result = unknownInfo
+          }
+          break
+
+        case 'seer':
+          // 预言家知道自己的查验结果
+          // 需要从 gameData 中获取 seer_context 或 checked_players
+          // 这里暂时返回未知，需要在后端返回查验信息
+          result = unknownInfo
+          break
+
+        case 'witch':
+        case 'hunter':
+        case 'villager':
+          // 女巫、猎人、村民只知道自己的角色
+          if (seat === this.data.mySeat) {
+            const roleLabels: Record<string, string> = {
+              witch: '女巫',
+              hunter: '猎人',
+              villager: '村民'
+            }
+            const roleColors: Record<string, string> = {
+              witch: '#FF69B4',
+              hunter: '#FF8C00',
+              villager: '#4CAF50'
+            }
+            result = {
+              role: myRole,
+              label: roleLabels[myRole] || myRole,
+              color: roleColors[myRole] || '#666666'
+            }
+          } else {
+            // 对其他玩家显示未知
+            result = unknownInfo
+          }
+          break
+
+        default:
+          result = unknownInfo
+          break
+      }
+
+      console.log(`[getKnownRoleInfo] 返回:`, result)
+      return result
     },
 
     // 夜晚操作相关方法
